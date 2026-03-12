@@ -252,13 +252,13 @@ blast-physics-js/
 
 ## Implementation Roadmap
 
-| Phase | Version | Scope |
-|-------|---------|-------|
-| **1** | v0.1.0 | Core data structures + PPV site law + PPV per-deck |
-| **2** | v0.2.0 | Scaled Heelan + Blair Lite + Holmberg-Persson + Jointed Rock damage |
-| **3** | v0.3.0 | Blair & Minchinton time-domain + Web Workers + Heelan Original |
-| **4** | v1.0.0 | Detonation simulator + flyrock (R&M, Lundborg, McKenzie) + pressure + powder factor |
-| **5** | v2.0.0 | Blast movement: voxelisation, Rapier3D physics, displacement vectors, post-blast surface |
+| Phase | Version | Scope | Status |
+|-------|---------|-------|--------|
+| **1** | v0.1.0 | Core data structures + PPV site law + PPV per-deck | ✅ Complete |
+| **2** | v0.2.0 | Scaled Heelan + Blair Lite + Holmberg-Persson + Jointed Rock damage | ✅ Complete |
+| **3** | v0.3.0 | Blair & Minchinton time-domain + Web Workers + Heelan Original | ✅ Complete |
+| **4** | v1.0.0 | Detonation simulator + flyrock (R&M, Lundborg, McKenzie) + pressure + powder factor | ✅ Complete |
+| **5** | v2.0.0 | Blast movement: voxelisation, Rapier3D physics, displacement vectors, post-blast surface | 🔜 Planned |
 
 ## References
 

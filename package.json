@@ -1,0 +1,39 @@
+{
+  "name": "blast-physics-js",
+  "version": "0.1.0",
+  "description": "JavaScript blast physics engine for mining — vibration, damage, detonation, flyrock, and blast movement models",
+  "author": "Brent Buffham <blastingapps.com>",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/blast-physics-js.cjs",
+  "module": "dist/blast-physics-js.js",
+  "exports": {
+    ".": {
+      "import": "./dist/blast-physics-js.js",
+      "require": "./dist/blast-physics-js.cjs"
+    },
+    "./workers": {
+      "import": "./src/workers/index.js"
+    }
+  },
+  "files": ["dist/", "src/"],
+  "keywords": [
+    "blast", "mining", "physics", "ppv", "vibration", "heelan",
+    "blair", "minchinton", "flyrock", "detonation", "damage",
+    "blast-movement", "grade-control", "explosives"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brentbuffham/blast-physics-js"
+  },
+  "homepage": "https://blastingapps.com",
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  }
+}
