@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>blast-physics-js — Model Demo</title>
+<style>
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #d0d0d0; }
+	/* Step 1) Top toolbar — horizontal layout */
+	#toolbar {
+		display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+		background: #111; border-bottom: 1px solid #333; flex-wrap: wrap;
+	}
+	#toolbar h1 { font-size: 1rem; color: #cc2222; white-space: nowrap; }
+	#toolbar p { font-size: 0.8rem; color: #888; }
+	.sep { width: 1px; height: 24px; background: #333; }
+	/* Step 2) Main layout — vertical stack: toolbar + content */
+	#app { display: flex; flex-direction: column; min-height: 100vh; }
+	#content { flex: 1; padding: 12px; overflow-y: auto; }
+	/* Step 3) Grid of model sections — horizontal + vertical panels */
+	.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+	@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+	.section {
+		border: 1px solid #333; border-radius: 6px; padding: 10px;
+		background: #111; display: flex; flex-direction: column; gap: 6px;
+	}
+	.section h2 { font-size: 0.9rem; color: #cc2222; margin-bottom: 2px; }
+	.section h2 .tag { font-size: 0.65rem; padding: 2px 6px; border-radius: 3px;
+		font-weight: normal; background: #cc222233; color: #cc2222; margin-left: 6px; }
+	.section canvas { display: block; width: 100%; background: #0a0a0a; border-radius: 4px; }
+	.output-panel { font-size: 0.75rem; font-family: 'Courier New', monospace;
+		background: #0a0a0a; padding: 8px; border-radius: 4px; min-height: 80px;
+		color: #999; line-height: 1.5; overflow: auto; }
+	.output-panel b { color: #d0d0d0; }
+	.output-panel .unit { color: #cc2222; }
+	.info { color: #666; font-size: 0.72rem; margin-top: 2px; }
+	.legend { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 0.7rem; }
+	.legend-swatch { height: 12px; border-radius: 2px; flex: 1; max-width: 120px; }
+</style>
+</head>
+<body>
+<div id="app">
+	<div id="toolbar">
+		<h1>blast-physics-js</h1>
+		<div class="sep"></div>
+		<p>Vibration · Damage · Pressure · Detonation · Flyrock — all models</p>
+	</div>
+
+	<div id="content">
+		<div class="grid">
+			<!-- Coordinate system + 4-hole blast (full width) -->
+			<div class="section" style="grid-column: 1 / -1;">
+				<h2>4-Hole Blast Pattern <span class="tag">Test · 50m grid · 25ms delays</span></h2>
+				<canvas id="c-axes" width="500" height="280" style="max-width: 100%; margin: 0 auto; display: block;"></canvas>
+				<div class="info">4 vertical holes, 50% length charge each, 0/25/50/75 ms. Plan view (XY) + hole locations.</div>
+			</div>
+
+			<!-- Vibration: PPV -->
+			<div class="section">
+				<h2>PPV <span class="tag">Site Law</span></h2>
+				<canvas id="c-ppv" width="280" height="140"></canvas>
+				<div class="legend"><span>0</span><div class="legend-swatch" id="leg-ppv"></div><span id="max-ppv">mm/s</span></div>
+				<div class="info" id="info-ppv">—</div>
+			</div>
+
+			<!-- Vibration: PPV Per-Deck -->
+			<div class="section">
+				<h2>PPV Per-Deck <span class="tag">Multi-Deck</span></h2>
+				<canvas id="c-ppvdeck" width="280" height="140"></canvas>
+				<div class="legend"><span>0</span><div class="legend-swatch" id="leg-ppvdeck"></div><span id="max-ppvdeck">mm/s</span></div>
+				<div class="info" id="info-ppvdeck">—</div>
+			</div>
+
+			<!-- Vibration: Scaled Heelan -->
+			<div class="section">
+				<h2>Scaled Heelan <span class="tag">Blair RMS</span></h2>
+				<canvas id="c-scaledheelan" width="280" height="140"></canvas>
+				<div class="legend"><span>0</span><div class="legend-swatch" id="leg-scaledheelan"></div><span id="max-scaledheelan">mm/s</span></div>
+				<div class="info" id="info-scaledheelan">—</div>
+			</div>
+
+			<!-- Vibration: Scaled Heelan Blair -->
+			<div class="section">
+				<h2>Scaled Heelan Blair <span class="tag">Blair Patterns</span></h2>
+				<canvas id="c-scaledheelanblair" width="280" height="140"></canvas>
+				<div class="legend"><span>0</span><div class="legend-swatch" id="leg-scaledheelanblair"></div><span id="max-scaledheelanblair">mm/s</span></div>
+				<div class="info" id="info-scaledheelanblair">—</div>
+			</div>
+
+			<!-- Vibration: Heelan Original -->
+			<div class="section">
+				<h2>Heelan Original <span class="tag">F1/F2</span></h2>
+				<canvas id="c-heelanorig" width="280" height="140"></canvas>
+				<div class="legend"><span>0</span><div class="legend-swatch" id="leg-heelanorig"></div><span id="max-heelanorig">mm/s</span></div>
+				<div class="info" id="info-heelanorig">—</div>
+			</div>
+
+			<!-- Damage: Holmberg-Persson -->
+			<div class="section">
+				<h2>Holmberg-Persson <span class="tag">Damage</span></h2>
+				<canvas id="c-holmberg" width="280" height="140"></canvas>
+				<div class="legend"><span>0</span><div class="legend-swatch" id="leg-holmberg"></div><span id="max-holmberg">DI</span></div>
+				<div class="info" id="info-holmberg">—</div>
+			</div>
+
+			<!-- Damage: Jointed Rock -->
+			<div class="section">
+				<h2>Jointed Rock <span class="tag">Damage</span></h2>
+				<canvas id="c-jointedrock" width="280" height="140"></canvas>
+				<div class="legend"><span>0</span><div class="legend-swatch" id="leg-jointedrock"></div><span id="max-jointedrock">ratio</span></div>
+				<div class="info" id="info-jointedrock">—</div>
+			</div>
+
+			<!-- Pressure: Borehole -->
+			<div class="section">
+				<h2>Borehole Pressure <span class="tag">MPa</span></h2>
+				<canvas id="c-borehole" width="280" height="140"></canvas>
+				<div class="legend"><span>0</span><div class="legend-swatch" id="leg-borehole"></div><span id="max-borehole">MPa</span></div>
+				<div class="info" id="info-borehole">—</div>
+			</div>
+
+			<!-- Pressure: Powder Factor -->
+			<div class="section">
+				<h2>Powder Factor <span class="tag">kg/m³</span></h2>
+				<canvas id="c-powderf" width="280" height="140"></canvas>
+				<div class="legend"><span>0</span><div class="legend-swatch" id="leg-powderf"></div><span id="max-powderf">kg/m³</span></div>
+				<div class="info" id="info-powderf">—</div>
+			</div>
+
+			<!-- Flyrock: Richards & Moore, Lundborg, McKenzie -->
+			<div class="section">
+				<h2>Flyrock</h2>
+				<div class="output-panel" id="out-flyrock">—</div>
+				<div class="info">Richards & Moore, Lundborg, McKenzie</div>
+			</div>
+
+			<!-- Detonation -->
+			<div class="section">
+				<h2>Detonation Simulator</h2>
+				<div class="output-panel" id="out-detonation">—</div>
+				<div class="info">Multi-primer front propagation</div>
+			</div>
+
+			<!-- Em Computation -->
+			<div class="section">
+				<h2>Em Computation</h2>
+				<div class="output-panel" id="out-em">—</div>
+				<div class="info">Σ Em = M^A (sequential)</div>
+			</div>
+
+			<!-- Flyrock: Envelope -->
+			<div class="section">
+				<h2>Ballistic Envelope</h2>
+				<canvas id="c-envelope" width="280" height="140"></canvas>
+				<div class="info" id="info-envelope">Chernigovskii: altitude(d) at V=40 m/s</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<script type="module">
+import {
+	createDeckEntry, createHoleEntry,
+	PPVModel, PPVDeckModel, ScaledHeelanModel, ScaledHeelanBlairModel, HeelanOriginalModel,
+	HolmbergPerssonDamageModel, JointedRockDamageModel,
+	BoreholePressureModel, PowderFactorModel,
+	richardsMoore, lundborg, mckenzie, envelopeAltitude,
+	simulateDetonation, computeSequentialEm
+} from "../src/index.js";
+
+// Step 1) Sample data — 4-hole blast, 50% length charge each, 25ms delays
+var holeData = [
+	{ collarX: 0, collarY: 0, toeX: 0, toeY: 0, holeTime: 0 },
+	{ collarX: 3, collarY: 2.5, toeX: 3, toeY: 2.5, holeTime: 25 },
+	{ collarX: 1.5, collarY: 0, toeX: 1.5, toeY: 0, holeTime: 50 },
+	{ collarX: 4.5, collarY: 2.5, toeX: 4.5, toeY: 2.5, holeTime: 75 }
+];
+var collarZ = 5, toeZ = 0;
+var chargeTopZ = 2.5;
+var chargeBaseZ = 0;
+var chargeMass = 30;
+
+var holeEntries = [];
+var deckEntries = [];
+for (var i = 0; i < holeData.length; i++) {
+	var hd = holeData[i];
+	holeEntries.push(createHoleEntry({
+		entityName: "Test", holeID: String(i + 1),
+		collarX: hd.collarX, collarY: hd.collarY, collarZ: collarZ,
+		toeX: hd.toeX, toeY: hd.toeY, toeZ: toeZ,
+		holeDiamMm: 115, holeTime: hd.holeTime
+	}));
+	deckEntries.push(createDeckEntry({
+		deckType: "COUPLED",
+		topX: hd.collarX, topY: hd.collarY, topZ: chargeTopZ,
+		baseX: hd.toeX, baseY: hd.toeY, baseZ: chargeBaseZ,
+		mass: chargeMass, density: 1.2, vod: 5000,
+		holeDiamMm: 115, timingMs: hd.holeTime, holeIndex: i, primerFraction: 1.0
+	}));
+}
+
+var gridSize = 50;
+var gridRows = 40;
+var gridCols = 40;
+var gridParams = {
+	minX: -25, minY: -25,
+	rows: gridRows, cols: gridCols,
+	cellX: gridSize / (gridRows - 1), cellY: gridSize / (gridCols - 1),
+	elevation: 2.5
+};
+
+var params = { K: 1140, B: 1.6, chargeExponent: 0.5, cutoffDistance: 1.0 };
+var heelanParams = {
+	K: 1140, B: 1.6, chargeExponent: 0.5, elemsPerDeck: 12,
+	pWaveVelocity: 4500, poissonRatio: 0.25, cutoffDistance: 0.5,
+	qualityFactorP: 0, qualityFactorS: 0
+};
+var heelanOrigParams = { elemsPerDeck: 12, cutoffDistance: 0.5, qualityFactorP: 0, qualityFactorS: 0 };
+
+// Step 1b) Draw 4-hole blast — plan view (XY) + oblique holes
+function drawAxesAndHole() {
+	var canvas = document.getElementById("c-axes");
+	if (!canvas) return;
+	var ctx = canvas.getContext("2d");
+	var w = canvas.width, h = canvas.height;
+	ctx.fillStyle = "#0a0a0a";
+	ctx.fillRect(0, 0, w, h);
+	var pad = 50;
+	var plotW = w - pad * 2, plotH = h - pad * 2;
+	var minX = -25, maxX = 25, minY = -25, maxY = 25;
+	function toScreen(x, y) {
+		var sx = pad + (x - minX) / (maxX - minX) * plotW;
+		var sy = pad + plotH - (y - minY) / (maxY - minY) * plotH;
+		return { x: sx, y: sy };
+	}
+	ctx.strokeStyle = "#333";
+	ctx.lineWidth = 1;
+	ctx.strokeRect(pad, pad, plotW, plotH);
+	ctx.fillStyle = "#666";
+	ctx.font = "10px sans-serif";
+	ctx.fillText("X (m)", w - pad - 20, h - pad + 16);
+	ctx.fillText("Y (m)", pad - 8, pad - 8);
+	ctx.strokeStyle = "#444";
+	ctx.beginPath();
+	ctx.moveTo(pad, pad + plotH / 2);
+	ctx.lineTo(w - pad, pad + plotH / 2);
+	ctx.stroke();
+	ctx.beginPath();
+	ctx.moveTo(pad + plotW / 2, pad);
+	ctx.lineTo(pad + plotW / 2, h - pad);
+	ctx.stroke();
+	var colors = ["#ff6644", "#44aa88", "#4488ff", "#cc44ff"];
+	for (var i = 0; i < holeEntries.length; i++) {
+		var hole = holeEntries[i];
+		var pt = toScreen(hole.collarX, hole.collarY);
+		ctx.fillStyle = colors[i];
+		ctx.beginPath();
+		ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
+		ctx.fill();
+		ctx.strokeStyle = "#fff";
+		ctx.lineWidth = 1.5;
+		ctx.stroke();
+		ctx.fillStyle = "#fff";
+		ctx.font = "bold 11px sans-serif";
+		ctx.textAlign = "center";
+		ctx.fillText("H" + (i + 1) + " " + hole.holeTime + "ms", pt.x, pt.y - 14);
+	}
+	ctx.fillStyle = "#888";
+	ctx.font = "10px sans-serif";
+	ctx.textAlign = "left";
+	ctx.fillText("Plan view: collar positions. H1–H4 @ 0, 25, 50, 75 ms. 50m grid.", pad, h - pad + 28);
+}
+drawAxesAndHole();
+
+// Step 2) Viridis-like colormap (0–1 → RGB) — simplified smooth gradient
+function viridis(t) {
+	if (t <= 0) return [0.27, 0.00, 0.33];
+	if (t >= 1) return [0.99, 1.00, 0.70];
+	var r, g, b;
+	if (t < 0.25) {
+		var u = t / 0.25;
+		r = 0.27 + u * (0.13 - 0.27);
+		g = 0.00 + u * 0.38;
+		b = 0.33 + u * (1.0 - 0.33);
+	} else if (t < 0.5) {
+		var u = (t - 0.25) / 0.25;
+		r = 0.13 + u * (0.72 - 0.13);
+		g = 0.38 + u * (0.91 - 0.38);
+		b = 1.0;
+	} else if (t < 0.75) {
+		var u = (t - 0.5) / 0.25;
+		r = 0.72 + u * (0.99 - 0.72);
+		g = 0.91 + u * (1.0 - 0.91);
+		b = 1.0 - u * 0.65;
+	} else {
+		var u = (t - 0.75) / 0.25;
+		r = 0.99;
+		g = 1.0;
+		b = 0.35 + u * (0.70 - 0.35);
+	}
+	return [r, g, b];
+}
+
+function drawHeatmap(canvas, ctx, data, rows, cols, maxVal, unit) {
+	var w = canvas.width, h = canvas.height;
+	var cellW = w / cols, cellH = h / rows;
+	for (var r = 0; r < rows; r++) {
+		for (var c = 0; c < cols; c++) {
+			var v = data[r * cols + c];
+			var t = maxVal > 0 ? Math.min(1, v / maxVal) : 0;
+			var rgb = viridis(t);
+			ctx.fillStyle = "rgb(" + Math.round(rgb[0] * 255) + "," + Math.round(rgb[1] * 255) + "," + Math.round(rgb[2] * 255) + ")";
+			ctx.fillRect(c * cellW, r * cellH, cellW + 1, cellH + 1);
+		}
+	}
+	var gp = gridParams;
+	for (var i = 0; i < holeEntries.length; i++) {
+		var h = holeEntries[i];
+		var cx = (h.collarX - gp.minX) / gp.cellX;
+		var cy = (h.collarY - gp.minY) / gp.cellY;
+		var px = cx * cellW + cellW / 2;
+		var py = cy * cellH + cellH / 2;
+		if (px >= 0 && px <= w && py >= 0 && py <= h) {
+			ctx.strokeStyle = "#fff";
+			ctx.lineWidth = 2;
+			ctx.beginPath();
+			ctx.arc(px, py, 4, 0, Math.PI * 2);
+			ctx.stroke();
+		}
+	}
+	return maxVal;
+}
+
+function drawLegendGradient(el, maxVal, unit) {
+	if (!el) return;
+	var w = 120, h = 12;
+	var c = document.createElement("canvas");
+	c.width = w; c.height = h;
+	var ctx = c.getContext("2d");
+	for (var i = 0; i < w; i++) {
+		var t = i / 120;
+		var rgb = viridis(t);
+		ctx.fillStyle = "rgb(" + Math.round(rgb[0] * 255) + "," + Math.round(rgb[1] * 255) + "," + Math.round(rgb[2] * 255) + ")";
+		ctx.fillRect(i, 0, 2, h);
+	}
+	el.style.backgroundImage = "url(" + c.toDataURL() + ")";
+	el.style.backgroundSize = "100% 100%";
+}
+
+function updateMax(el, val, unit) {
+	if (el) el.textContent = val.toFixed(1) + " " + unit;
+}
+
+// Step 3) Run grid models
+function runGridModel(id, model, needsHoles, infoEl, maxEl, legEl) {
+	var t0 = performance.now();
+	var result;
+	try {
+		if (needsHoles) {
+			result = model.computeGrid(deckEntries, holeEntries, gridParams);
+		} else {
+			result = model.computeGrid(deckEntries, gridParams);
+		}
+	} catch (e) {
+		if (infoEl) infoEl.textContent = "Error: " + e.message;
+		return;
+	}
+	var dt = (performance.now() - t0).toFixed(1);
+	var max = 0;
+	for (var i = 0; i < result.data.length; i++) {
+		if (result.data[i] > max) max = result.data[i];
+	}
+	var canvas = document.getElementById("c-" + id);
+	drawHeatmap(canvas, canvas.getContext("2d"), result.data, result.rows, result.cols, max, result.unit);
+	updateMax(maxEl, max, result.unit);
+	drawLegendGradient(legEl, max, result.unit);
+	if (infoEl) infoEl.textContent = result.rows + "×" + result.cols + " grid, " + dt + " ms";
+}
+
+// Step 4) Run all models on load
+runGridModel("ppv", new PPVModel(params), false, document.getElementById("info-ppv"), document.getElementById("max-ppv"), document.getElementById("leg-ppv"));
+runGridModel("ppvdeck", new PPVDeckModel(params), false, document.getElementById("info-ppvdeck"), document.getElementById("max-ppvdeck"), document.getElementById("leg-ppvdeck"));
+runGridModel("scaledheelan", new ScaledHeelanModel(heelanParams), true, document.getElementById("info-scaledheelan"), document.getElementById("max-scaledheelan"), document.getElementById("leg-scaledheelan"));
+runGridModel("scaledheelanblair", new ScaledHeelanBlairModel(heelanParams), true, document.getElementById("info-scaledheelanblair"), document.getElementById("max-scaledheelanblair"), document.getElementById("leg-scaledheelanblair"));
+runGridModel("heelanorig", new HeelanOriginalModel(heelanOrigParams), true, document.getElementById("info-heelanorig"), document.getElementById("max-heelanorig"), document.getElementById("leg-heelanorig"));
+runGridModel("holmberg", new HolmbergPerssonDamageModel({ ppvCritical: 700 }), false, document.getElementById("info-holmberg"), document.getElementById("max-holmberg"), document.getElementById("leg-holmberg"));
+runGridModel("jointedrock", new JointedRockDamageModel(), false, document.getElementById("info-jointedrock"), document.getElementById("max-jointedrock"), document.getElementById("leg-jointedrock"));
+runGridModel("borehole", new BoreholePressureModel(), false, document.getElementById("info-borehole"), document.getElementById("max-borehole"), document.getElementById("leg-borehole"));
+runGridModel("powderf", new PowderFactorModel(), false, document.getElementById("info-powderf"), document.getElementById("max-powderf"), document.getElementById("leg-powderf"));
+
+// Step 5) Flyrock scalar output (bench 5m to match 4-hole blast)
+var rmParams = { holeDiamMm: 115, benchHeight: 5, stemmingLength: 1.25, burden: 2.5, subdrill: 0.5, explosiveDensity: 1.2, K: 20, factorOfSafety: 2 };
+var rm = richardsMoore(rmParams);
+var lu = lundborg({ holeDiamMm: 115, factorOfSafety: 2 });
+var mc = mckenzie({ holeDiamMm: 115, stemmingLength: 1.25, chargeLength: 2.5, explosiveDensity: 1.2, rockDensity: 2600, factorOfSafety: 2 });
+var flyEl = document.getElementById("out-flyrock");
+flyEl.innerHTML = "<b>Richards & Moore:</b> faceBurst=" + rm.faceBurst.toFixed(1) + " m, cratering=" + rm.cratering.toFixed(1) + " m, stemEject=" + rm.stemEject.toFixed(1) + " m, max=" + rm.maxDistance.toFixed(1) + " m, V=" + rm.maxVelocity.toFixed(1) + " m/s<br>" +
+	"<b>Lundborg:</b> clearance=" + lu.clearanceDistance.toFixed(1) + " m, V=" + lu.maxVelocity.toFixed(1) + " m/s<br>" +
+	"<b>McKenzie:</b> SDoB=" + mc.sDoB.toFixed(3) + ", max=" + mc.maxDistance.toFixed(1) + " m, V=" + mc.maxVelocity.toFixed(1) + " m/s";
+
+// Step 6) Detonation simulation (50% charge, 2.5m column, base primer at toe)
+var column = { chargeTopDepth: 2.5, chargeBaseDepth: 5, totalMass: chargeMass, vod: 5000, numElements: 8, primers: [{ depthAlongColumn: 0.1, fireTime: 0 }] };
+var elems = simulateDetonation(column);
+var detHtml = "8 elements, base primer, " + chargeMass + " kg: detTimes (ms) ";
+elems.slice(0, 5).forEach(function(e) { detHtml += e.detTime.toFixed(1) + " "; });
+detHtml += "... ";
+elems.slice(-3).forEach(function(e) { detHtml += e.detTime.toFixed(1) + " "; });
+document.getElementById("out-detonation").innerHTML = detHtml;
+
+// Step 7) Em computation
+var em = computeSequentialEm(10, 100, 0.5);
+var sum = Array.from(em).reduce(function(s, v) { return s + v; }, 0);
+document.getElementById("out-em").innerHTML = "Σ Em = " + sum.toFixed(4) + " (expected M^0.5 = " + Math.pow(100, 0.5).toFixed(4) + ")";
+
+// Step 8) Ballistic envelope — 2D plot
+var envCanvas = document.getElementById("c-envelope");
+var envCtx = envCanvas.getContext("2d");
+var V = 40, g = 9.80665;
+var rangeMax = V * V / g;
+var w = envCanvas.width, h = envCanvas.height;
+envCtx.fillStyle = "#0a0a0a";
+envCtx.fillRect(0, 0, w, h);
+envCtx.strokeStyle = "#cc2222";
+envCtx.lineWidth = 2;
+envCtx.beginPath();
+for (var i = 0; i <= w; i++) {
+	var d = (i / w) * rangeMax;
+	var alt = envelopeAltitude(d, V);
+	if (isNaN(alt)) break;
+	var px = i;
+	var py = h - (alt / (V * V / (2 * g))) * h;
+	if (i === 0) envCtx.moveTo(px, py);
+	else envCtx.lineTo(px, py);
+}
+envCtx.stroke();
+envCtx.fillStyle = "#888";
+envCtx.font = "10px sans-serif";
+envCtx.fillText("d (m)", w - 30, h - 4);
+envCtx.fillText("altitude (m)", 4, 12);
+</script>
+</body>
+</html>

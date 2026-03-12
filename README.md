@@ -50,6 +50,16 @@ npm install blast-physics-js
 | **Flyrock** | Richards & Moore, Lundborg, McKenzie (SDoB) | metres, m/s |
 | **Movement** | Voxel-based blast throw with Rapier3D WASM physics | displacement vectors |
 
+## Demo
+
+Run the interactive demo to see all models in action:
+
+```bash
+npm run dev
+```
+
+Opens `examples/index.html` at http://localhost:5175 — vibration heatmaps, damage, pressure, flyrock, detonation, and ballistic envelope.
+
 ## Quick Start
 
 ### Single-point PPV
