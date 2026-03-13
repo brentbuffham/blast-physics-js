@@ -16,11 +16,25 @@
       "import": "./src/workers/index.js"
     }
   },
-  "files": ["dist/", "src/"],
+  "files": [
+    "dist/",
+    "src/"
+  ],
   "keywords": [
-    "blast", "mining", "physics", "ppv", "vibration", "heelan",
-    "blair", "minchinton", "flyrock", "detonation", "damage",
-    "blast-movement", "grade-control", "explosives"
+    "blast",
+    "mining",
+    "physics",
+    "ppv",
+    "vibration",
+    "heelan",
+    "blair",
+    "minchinton",
+    "flyrock",
+    "detonation",
+    "damage",
+    "blast-movement",
+    "grade-control",
+    "explosives"
   ],
   "repository": {
     "type": "git",
@@ -30,10 +44,13 @@
   "scripts": {
     "build": "vite build",
     "dev": "npx vite examples --port 5175",
+    "precompute": "node examples/precompute.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "lil-gui": "^0.21.0",
+    "three": "^0.170.0",
     "vite": "^6.0.0",
     "vitest": "^3.0.0"
   }
