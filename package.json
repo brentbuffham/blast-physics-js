@@ -43,6 +43,7 @@
   "homepage": "https://blastingapps.com",
   "scripts": {
     "build": "vite build",
+    "build:pages": "vite build --config vite.pages.config.js",
     "dev": "npx vite examples --port 5175",
     "precompute": "node examples/precompute.mjs",
     "test": "vitest run",
