@@ -5,6 +5,7 @@ export default defineConfig({
     base: "/blast-physics-js/",
     build: {
         outDir: "../dist-pages",
-        emptyOutDir: true
+        emptyOutDir: true,
+        target: "esnext"
     }
 });
