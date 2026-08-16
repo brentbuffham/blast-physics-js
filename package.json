@@ -1,7 +1,7 @@
 {
   "name": "blast-physics-js",
-  "version": "0.1.0",
-  "description": "JavaScript blast physics engine for mining — vibration, damage, detonation, flyrock, and blast movement models",
+  "version": "0.2.0",
+  "description": "JavaScript blast physics engine for mining — vibration, damage, detonation, flyrock, frequency analysis, ripple tank, KAP import and voxel blast movement (muckpile) models",
   "author": "Brent Buffham <blastingapps.com>",
   "license": "MIT",
   "type": "module",
@@ -14,6 +14,9 @@
     },
     "./workers": {
       "import": "./src/workers/index.js"
+    },
+    "./src/*": {
+      "import": "./src/*"
     }
   },
   "files": [
@@ -34,7 +37,16 @@
     "damage",
     "blast-movement",
     "grade-control",
-    "explosives"
+    "explosives",
+    "muckpile",
+    "ripple-tank",
+    "fft",
+    "probability-of-exceedance",
+    "sdob",
+    "kap",
+    "kirra",
+    "signature-hole",
+    "forward-array"
   ],
   "repository": {
     "type": "git",
@@ -43,7 +55,7 @@
   "homepage": "https://blastingapps.com",
   "scripts": {
     "build": "vite build",
-    "build:pages": "vite build --config vite.pages.config.js && cp examples/blast-data.json examples/precomputed-points.json dist-pages/",
+    "build:pages": "vite build --config vite.pages.config.js && cp examples/blast-data.json examples/precomputed-points.json examples/SWELLFACTOR.kap dist-pages/",
     "dev": "npx vite examples --port 5175",
     "precompute": "node examples/precompute.mjs",
     "test": "vitest run",

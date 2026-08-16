@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>blast-physics-js — Blast Throw / Muckpile Simulator</title>
+<style>
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #d0d0d0; overflow: hidden; }
+	#app { display: flex; height: 100vh; }
+	#viewport { flex: 1; position: relative; }
+	#info-panel {
+		width: 250px; min-width: 200px; background: #111; border-left: 1px solid #333;
+		padding: 10px 12px; font-size: 0.72rem; font-family: 'Courier New', monospace;
+		overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+	}
+	#info-panel h3 { color: #cc2222; font-size: 0.8rem; margin-bottom: 4px; }
+	#info-panel .stat { color: #999; line-height: 1.6; word-break: break-word; }
+	#info-panel .stat b { color: #d0d0d0; }
+	#info-panel hr { border: none; border-top: 1px solid #333; margin: 4px 0; }
+	#info-panel a { color: #6aa0ff; }
+	#legend-bar { height: 14px; border-radius: 3px; margin-top: 4px; }
+	.legend-row { display: flex; justify-content: space-between; font-size: 0.65rem; color: #888; margin-top: 2px; }
+	#footer { position: absolute; left: 0; right: 0; bottom: 0; height: 26px; background: rgba(0,0,0,0.6); display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 0.72rem; }
+	#prog { flex: 1; height: 8px; background: #333; border-radius: 4px; cursor: pointer; }
+	#prog-fill { height: 100%; width: 0%; background: #cc2222; border-radius: 4px; }
+	#drop { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(204,34,34,0.25); font-size: 1.4rem; pointer-events: none; }
+	#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #cc2222; font-size: 1.2rem; z-index: 100; }
+	.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #444; }
+	.dot.on { background: #2c2; }
+</style>
+</head>
+<body>
+<div id="app">
+	<div id="viewport">
+		<div id="loading">Loading SWELLFACTOR.kap…</div>
+		<div id="drop">Drop a .kap file</div>
+		<div id="footer"><span class="dot" id="dot"></span><span id="tD">0.000 s</span><div id="prog"><div id="prog-fill"></div></div><span id="sInf">—</span></div>
+	</div>
+	<div id="info-panel">
+		<h3>Blast Throw</h3>
+		<div class="stat" id="stat-file">—</div>
+		<hr>
+		<h3>Simulation</h3>
+		<div class="stat" id="stat-sim">—</div>
+		<div id="legend-bar"></div>
+		<div class="legend-row"><span>0</span><span id="legend-max">—</span></div>
+		<hr>
+		<h3>Survey / Calibration</h3>
+		<div class="stat" id="stat-cal">Load a KAP with PREBLAST_VOLUME + POSTBLAST surfaces to calibrate.</div>
+		<hr>
+		<h3>Surfaces</h3>
+		<div class="stat" id="stat-surf">—</div>
+		<hr>
+		<div class="stat">Yang 3DMuck kinematic launch + sphere DEM transport (<a href="./index.html">vibration demo</a>). Drop any Kirra .kap on the viewport.</div>
+	</div>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import GUI from "lil-gui";
+import { parseKAP, BlastMovementSimulator, ST_INACTIVE, ST_ACTIVE, ST_REST, SUB_DT } from "../src/index.js";
+
+// Step 1) Three.js scene (Z-up, local coordinates around the hole centroid)
+var container = document.getElementById("viewport");
+var scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0b0e);
+var camera = new THREE.PerspectiveCamera(50, 1, 0.5, 5000);
+camera.up.set(0, 0, 1);
+var renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+container.appendChild(renderer.domElement);
+var controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+var dl = new THREE.DirectionalLight(0xffffff, 0.6); dl.position.set(50, -80, 120); scene.add(dl);
+var holesGrp = new THREE.Group(), surfGrp = new THREE.Group(), voxGrp = new THREE.Group();
+scene.add(holesGrp, surfGrp, voxGrp);
+var axes = new THREE.AxesHelper(20); axes.visible = false; scene.add(axes);
+
+function onResize() {
+	var w = container.clientWidth, h = container.clientHeight;
+	camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h);
+}
+window.addEventListener("resize", onResize); onResize();
+
+// Step 2) Heat colormap + legend
+function heatCol(t) {
+	t = Math.max(0, Math.min(1, t));
+	var r, g, b;
+	if (t < 0.2)       { var s = t / .2;         r = .08 + s * .02; g = .15 + s * .55; b = .35 - s * .15; }
+	else if (t < 0.45) { var s2 = (t - .2) / .25; r = .1 + s2 * .6;  g = .7 - s2 * .15;  b = .2 - s2 * .18; }
+	else if (t < 0.7)  { var s3 = (t - .45) / .25; r = .7 + s3 * .25; g = .55 - s3 * .25; b = .02; }
+	else               { var s4 = (t - .7) / .3;  r = .95 + s4 * .05; g = .3 - s4 * .25;  b = s4 * .15; }
+	return [r, g, b];
+}
+(function legend() {
+	var c = document.createElement("canvas"); c.width = 200; c.height = 14;
+	var ctx = c.getContext("2d");
+	for (var i = 0; i < 200; i++) { var rgb = heatCol(i / 200); ctx.fillStyle = "rgb(" + (rgb[0] * 255 | 0) + "," + (rgb[1] * 255 | 0) + "," + (rgb[2] * 255 | 0) + ")"; ctx.fillRect(i, 0, 2, 14); }
+	var el = document.getElementById("legend-bar"); el.style.backgroundImage = "url(" + c.toDataURL() + ")"; el.style.backgroundSize = "100% 100%";
+})();
+
+// Step 3) Simulator + parameters (throw_4 defaults)
+var P = {
+	rockType: "Granite / fresh", rockDensity: 2650, bulkT: 0.6, maxSwell: 1.4,
+	Pe: 1.0, bExp: 1.5, cSteer: 0.85, timingWindowMs: 40, fallbackVelocity: 5, restitution: 0.1, friction: 0.5, g: 9.81,
+	voxelRes: 1.5, sizeVariationPct: 35, maxVoxels: 30000, shape: "cube",
+	speed: 1.0, colourMode: "velocity",
+	showHoles: true, showShell: true, showReference: true, showVolume: false, showVoxels: true, showAxes: false
+};
+var ROCK_TYPES = { "Custom": null, "Coal / v.soft": 1800, "Sandstone": 2300, "Shale": 2500, "Granite / fresh": 2650, "Dolerite": 2900, "Iron ore / BIF": 3300 };
+var sim = new BlastMovementSimulator(Object.assign({ seed: null }, P));
+var kap = null, iMesh = null, maxTime = 1, running = false, paused = false, ff = false, accum = 0, lastT = 0, distMax = 1, calibrating = false;
+var _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _c = new THREE.Color();
+
+function setStatus(t) { document.getElementById("sInf").textContent = t; }
+
+// Step 4) Load a KAP (fetch or dropped file)
+async function loadKAP(source, name) {
+	document.getElementById("loading").style.display = "block";
+	document.getElementById("loading").textContent = "Parsing " + name + "…";
+	try {
+		kap = await parseKAP(source);
+		sim.setParams(P);
+		sim.load(kap);
+		buildStaticScene();
+		regenerate();
+		var tmin = Infinity, tmax = -Infinity;
+		sim.holes.forEach(function (h) { if (h.fireT < tmin) tmin = h.fireT; if (h.fireT > tmax) tmax = h.fireT; });
+		document.getElementById("stat-file").innerHTML =
+			"File: <b>" + name + "</b><br>Holes: <b>" + kap.holes.length + "</b> · Decks: <b>" + kap.decks.length + "</b><br>" +
+			"Fire window: <b>" + (tmin * 1000).toFixed(0) + "–" + (tmax * 1000).toFixed(0) + " ms</b><br>" +
+			"Charge elements: <b>" + sim.chargeElementCount + "</b><br>Confinement: <b>" + (sim.shellTrusted ? "trusted SHELL" : "topo (lid-excluded)") + "</b>";
+		var roleLabel = { voxelblk: "VOLUME", shell: "CONFINE", shelltopo: "TOPO", reference: "POST-REF", other: "OTHER" };
+		document.getElementById("stat-surf").innerHTML = kap.surfaces.map(function (s) { return "<b>" + roleLabel[s.role] + "</b> " + s.name + " (" + s.nt + " tris)"; }).join("<br>") || "none";
+		var T = sim.surveyTargets();
+		document.getElementById("stat-cal").innerHTML = T.err ? T.err :
+			"Survey: in-situ <b>" + (T.insituVol / 1000).toFixed(1) + "k m³</b> · muck <b>" + (T.muckVol / 1000).toFixed(1) + "k m³</b><br>swell <b>" + T.swell.toFixed(3) + "×</b> · CoM throw <b>" + T.D.toFixed(1) + " m @ " + T.bearing.toFixed(0) + "°</b><br>Use Calibrate to fit Pe.";
+		setStatus("Ready — press FIRE");
+	} catch (e) {
+		console.error(e);
+		setStatus("Load error: " + e.message);
+	}
+	document.getElementById("loading").style.display = "none";
+}
+
+// Step 5) Static scene: holes + surfaces in local coords
+function buildStaticScene() {
+	holesGrp.clear(); surfGrp.clear();
+	var O = sim.origin;
+	var hn = sim.holes.length;
+	if (hn) {
+		var tMin = Infinity, tMax = -Infinity;
+		sim.holes.forEach(function (h) { if (h.fireT < tMin) tMin = h.fireT; if (h.fireT > tMax) tMax = h.fireT; });
+		var tRange = (tMax - tMin) || 1;
+		var cyl = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 6), new THREE.MeshBasicMaterial({ color: 0xff3333 }), hn);
+		var ring = new THREE.InstancedMesh(new THREE.RingGeometry(0.35, 0.8, 12), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, transparent: true, opacity: 0.85 }), hn);
+		var yAxis = new THREE.Vector3(0, 1, 0), dir = new THREE.Vector3();
+		sim.holes.forEach(function (h, i) {
+			dir.set(h.tx - h.cx, h.ty - h.cy, h.tz - h.cz);
+			var len = dir.length();
+			if (len < 0.01) { _m4.makeScale(1e-4, 1e-4, 1e-4); }
+			else {
+				_q.setFromUnitVectors(yAxis, dir.normalize());
+				_p.set((h.cx + h.tx) / 2 - O.x, (h.cy + h.ty) / 2 - O.y, (h.cz + h.tz) / 2 - O.z);
+				var rad = Math.max(h.diameter / 2, 0.08);
+				_s.set(rad, len, rad);
+				_m4.compose(_p, _q, _s);
+			}
+			cyl.setMatrixAt(i, _m4);
+			_m4.makeTranslation(h.cx - O.x, h.cy - O.y, h.cz - O.z + 0.1);
+			ring.setMatrixAt(i, _m4);
+			var rgb = heatCol((h.fireT - tMin) / tRange);
+			ring.setColorAt(i, _c.setRGB(rgb[0], rgb[1], rgb[2]));
+		});
+		cyl.instanceMatrix.needsUpdate = true; ring.instanceMatrix.needsUpdate = true;
+		if (ring.instanceColor) ring.instanceColor.needsUpdate = true;
+		holesGrp.add(cyl, ring);
+	}
+	sim.surfaces.forEach(function (surf) {
+		var p32 = new Float32Array(surf.np * 3);
+		for (var i = 0; i < surf.np; i++) { p32[i * 3] = surf.pos[i * 3] - O.x; p32[i * 3 + 1] = surf.pos[i * 3 + 1] - O.y; p32[i * 3 + 2] = surf.pos[i * 3 + 2] - O.z; }
+		var geo = new THREE.BufferGeometry();
+		geo.setAttribute("position", new THREE.BufferAttribute(p32, 3));
+		geo.setIndex(new THREE.BufferAttribute(surf.idx, 1));
+		geo.computeVertexNormals();
+		var mesh;
+		if (surf.role === "shell" || surf.role === "shelltopo") mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: surf.role === "shell" ? 0x2563eb : 0x3b82f6, transparent: true, opacity: 0.25, side: THREE.DoubleSide }));
+		else if (surf.role === "reference") mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x22c55e, transparent: true, opacity: 0.3, side: THREE.DoubleSide }));
+		else if (surf.role === "voxelblk") mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xf97316, wireframe: true, transparent: true, opacity: 0.12 }));
+		else mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x6b7280, wireframe: true, transparent: true, opacity: 0.08 }));
+		mesh.userData.role = surf.role;
+		surfGrp.add(mesh);
+	});
+	controls.target.set(0, 0, 0);
+	camera.position.set(120, -160, 110);
+	controls.update();
+}
+
+// Step 6) Voxels → instanced mesh
+function regenerate() {
+	if (!kap) return;
+	if (iMesh) { voxGrp.remove(iMesh); iMesh.geometry.dispose(); iMesh.material.dispose(); iMesh = null; }
+	sim.setParams(P);
+	var N = sim.generateVoxels();
+	running = false; paused = false; ff = false; accum = 0; sim.reset();
+	maxTime = sim.lastFireT + 6;
+	if (!N) { setStatus("No voxels"); return; }
+	var res = sim.actualRes;
+	var geo;
+	if (P.shape === "sphere") geo = new THREE.SphereGeometry(res * 0.5, 8, 6);
+	else if (P.shape === "dodec") geo = new THREE.DodecahedronGeometry(res * 0.58, 0);
+	else geo = new THREE.BoxGeometry(res * 0.88, res * 0.88, res * 0.88);
+	iMesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial(), N);
+	iMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+	iMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
+	iMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+	voxGrp.add(iMesh);
+	distMax = 1;
+	updateVisuals(true);
+	updateStats();
+}
+
+function updateVisuals(force) {
+	if (!iMesh || !sim.S) return;
+	var S = sim.S, N = S.N;
+	var vScale = S.v0Max || 10;
+	for (var i = 0; i < N; i++) {
+		var st = S.state[i];
+		if (!force && st === ST_INACTIVE) continue;
+		var sc = S.rad[i] / S.baseR;
+		_p.set(S.px[i], S.py[i], S.pz[i]);
+		_e.set(S.rx[i], S.ry[i], S.rz[i]); _q.setFromEuler(_e);
+		_s.set(sc, sc, sc);
+		_m4.compose(_p, _q, _s);
+		iMesh.setMatrixAt(i, _m4);
+		var t;
+		if (st === ST_INACTIVE) { iMesh.setColorAt(i, _c.setHex(0x3a3e4a)); continue; }
+		if (P.colourMode === "distance") { if (S.dist[i] > distMax) distMax = S.dist[i]; t = S.dist[i] / distMax; }
+		else if (P.colourMode === "timing") t = sim.lastFireT > 0 ? S.at[i] / sim.lastFireT : 0;
+		else t = Math.sqrt(S.vx[i] * S.vx[i] + S.vy[i] * S.vy[i] + S.vz[i] * S.vz[i]) / vScale;
+		if (st === ST_REST && P.colourMode === "velocity") t = 0;
+		var rgb = heatCol(t);
+		iMesh.setColorAt(i, _c.setRGB(rgb[0], rgb[1], rgb[2]));
+	}
+	iMesh.instanceMatrix.needsUpdate = true;
+	iMesh.instanceColor.needsUpdate = true;
+	document.getElementById("legend-max").textContent = P.colourMode === "distance" ? distMax.toFixed(0) + " m" : P.colourMode === "timing" ? (sim.lastFireT * 1000).toFixed(0) + " ms" : vScale.toFixed(0) + " m/s";
+}
+
+function updateStats() {
+	if (!sim.S) return;
+	var s = sim.stats;
+	document.getElementById("stat-sim").innerHTML =
+		"Blocks: <b>" + sim.S.N + "</b> @ <b>" + sim.actualRes.toFixed(2) + " m</b><br>" +
+		"Active: <b>" + s.active + "</b> · Resting: <b>" + s.resting + "</b><br>" +
+		"v₀ max: <b>" + sim.S.v0Max.toFixed(1) + " m/s</b> · t = <b>" + sim.time.toFixed(2) + " s</b><br>Colour: <b>" + P.colourMode + "</b>";
+	document.getElementById("tD").textContent = sim.time.toFixed(3) + " s";
+	document.getElementById("prog-fill").style.width = Math.min(sim.time / maxTime * 100, 100) + "%";
+	document.getElementById("dot").classList.toggle("on", running && !paused);
+}
+
+function finishReport() {
+	var r = sim.results();
+	setStatus("Complete · swell " + r.swell.toFixed(2) + "× · CoM throw " + r.comShift.D.toFixed(1) + " m @ " + r.comShift.bearing.toFixed(0) + "° · " + r.stats.resting + " at rest");
+}
+
+// Step 7) Animation loop
+function animate(ts) {
+	requestAnimationFrame(animate);
+	var realDt = Math.min((ts - lastT) / 1000, 0.05); lastT = ts;
+	controls.update();
+	if (running && !paused && !ff && sim.S) {
+		accum += realDt * P.speed;
+		var steps = 0, r = sim.stats;
+		while (accum >= SUB_DT && steps < 8) { r = sim.step(SUB_DT); accum -= SUB_DT; steps++; }
+		if (accum > SUB_DT * 8) accum = 0;
+		updateVisuals(false); updateStats();
+		if (sim.isSettled()) { running = false; finishReport(); }
+		else setStatus("Simulating");
+	}
+	holesGrp.visible = P.showHoles; voxGrp.visible = P.showVoxels; axes.visible = P.showAxes;
+	surfGrp.children.forEach(function (m) {
+		var role = m.userData.role;
+		m.visible = role === "reference" ? P.showReference : (role === "voxelblk" ? P.showVolume : (role === "other" ? P.showVolume : P.showShell));
+	});
+	renderer.render(scene, camera);
+}
+requestAnimationFrame(animate);
+
+// Step 8) Controls: fire / pause / reset / fast-forward
+function fire() { if (!sim.S || calibrating) return; sim.fire(); running = true; paused = false; ff = false; accum = 0; distMax = 1; updateVisuals(true); }
+function reset() { sim.reset(); running = false; paused = false; ff = false; accum = 0; distMax = 1; updateVisuals(true); updateStats(); setStatus("Ready"); }
+function fastForwardTo(target) {
+	if (!sim.S || calibrating) return;
+	if ((sim.time === 0 && !running) || target < sim.time - 1e-6) { sim.fire(); running = true; }
+	ff = true; paused = false;
+	setStatus("Fast-forwarding…");
+	(function chunk() {
+		if (!ff) return;
+		var steps = 0;
+		while (sim.time < target && steps < 40) { sim.step(SUB_DT); steps++; if (sim.isSettled()) break; }
+		updateVisuals(false); updateStats();
+		if (sim.time >= target || sim.isSettled()) { ff = false; if (sim.isSettled()) { running = false; finishReport(); } else setStatus("Simulating"); return; }
+		setTimeout(chunk, 0);
+	})();
+}
+document.getElementById("prog").addEventListener("pointerdown", function (e) {
+	var r = e.currentTarget.getBoundingClientRect();
+	fastForwardTo(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * maxTime);
+});
+
+async function calibrate() {
+	if (!kap || calibrating) return;
+	calibrating = true; running = false; ff = false;
+	var out = document.getElementById("stat-cal");
+	var res = await sim.calibrate({ coarseMaxVoxels: 10000, onProgress: function (label) { setStatus(label); } });
+	calibrating = false;
+	if (res.err) { out.textContent = res.err; setStatus(res.err); return; }
+	P.Pe = res.fitted.Pe; P.maxSwell = res.fitted.maxSwell;
+	gui.controllersRecursive().forEach(function (c) { c.updateDisplay(); });
+	out.innerHTML = "Survey: swell <b>" + res.survey.swell.toFixed(3) + "×</b> · CoM throw <b>" + res.survey.D.toFixed(1) + " m @ " + res.survey.bearing.toFixed(0) + "°</b><br>" +
+		"Fitted: Pe <b>" + res.fitted.Pe.toFixed(2) + "</b> → sim throw <b>" + res.fitted.throwD.toFixed(1) + " m</b> (" + res.fitted.pctOfSurvey.toFixed(0) + "% of survey) · Max swell set <b>" + res.fitted.maxSwell.toFixed(2) + "×</b>";
+	regenerate();
+	setStatus("Calibration applied — press FIRE for a full-resolution run");
+}
+
+// Step 9) lil-gui
+var gui = new GUI({ title: "Blast Throw Controls", width: 300, container: container });
+gui.domElement.style.position = "absolute"; gui.domElement.style.top = "0px"; gui.domElement.style.left = "0px";
+gui.domElement.style.maxHeight = "calc(100% - 26px)"; gui.domElement.style.overflowY = "auto";
+var live = function () { sim.setParams(P); };
+var fRock = gui.addFolder("Rock");
+fRock.add(P, "rockType", Object.keys(ROCK_TYPES)).name("Rock type").onChange(function (v) { if (ROCK_TYPES[v]) { P.rockDensity = ROCK_TYPES[v]; live(); gui.controllersRecursive().forEach(function (c) { c.updateDisplay(); }); } });
+fRock.add(P, "rockDensity", 1600, 3600, 50).name("Density (kg/bcm)").onChange(function () { P.rockType = "Custom"; live(); });
+fRock.add(P, "bulkT", 0.1, 3, 0.1).name("Bulk time (s)").onChange(live);
+fRock.add(P, "maxSwell", 1.0, 2.0, 0.05).name("Max swell (×)").onChange(live);
+var fKin = gui.addFolder("Kinematic Loading (3DMuck)");
+fKin.add(P, "Pe", 0.2, 3, 0.05).name("Pe · expl. strength").onChange(live);
+fKin.add(P, "bExp", 1.0, 2.5, 0.05).name("b · attenuation").onChange(live);
+fKin.add(P, "cSteer", 0, 1.5, 0.05).name("c · relief steer").onChange(live);
+fKin.add(P, "timingWindowMs", 10, 100, 5).name("Timing window (ms)").onChange(live);
+fKin.add(P, "fallbackVelocity", 1, 15, 0.5).name("Fallback vel (m/s)").onChange(live);
+fKin.add(P, "restitution", 0, 0.5, 0.05).name("Restitution").onChange(live);
+fKin.add(P, "friction", 0.1, 1, 0.05).name("Friction").onChange(live);
+fKin.add(P, "g", 5, 15, 0.5).name("Gravity (m/s²)").onChange(live);
+var fVox = gui.addFolder("Voxel Grid");
+fVox.add(P, "voxelRes", 0.5, 6, 0.25).name("Resolution (m)").onFinishChange(regenerate);
+fVox.add(P, "sizeVariationPct", 0, 70, 5).name("Size variation (%)").onFinishChange(regenerate);
+fVox.add(P, "maxVoxels", 1000, 60000, 1000).name("Max voxels").onFinishChange(regenerate);
+fVox.add(P, "shape", ["cube", "sphere", "dodec"]).name("Block shape").onChange(regenerate);
+var fDisp = gui.addFolder("Display");
+fDisp.add(P, "colourMode", ["velocity", "distance", "timing"]).name("Colour by").onChange(function () { updateVisuals(true); });
+fDisp.add(P, "showHoles").name("Blastholes + timing");
+fDisp.add(P, "showShell").name("Shell / topo");
+fDisp.add(P, "showReference").name("Post-blast reference");
+fDisp.add(P, "showVolume").name("Volume outline");
+fDisp.add(P, "showVoxels").name("Voxels");
+fDisp.add(P, "showAxes").name("Axes");
+fDisp.close();
+var fSim = gui.addFolder("Simulation");
+fSim.add(P, "speed", 0.1, 3, 0.1).name("Speed (×)");
+var actions = { fire: fire, pause: function () { paused = !paused; }, end: function () { fastForwardTo(1e9); }, reset: reset, calibrate: calibrate };
+fSim.add(actions, "fire").name("▶ FIRE");
+fSim.add(actions, "pause").name("⏸ Pause / resume");
+fSim.add(actions, "end").name("⏭ End (fast-forward)");
+fSim.add(actions, "reset").name("↻ Reset");
+fSim.add(actions, "calibrate").name("◎ Calibrate from survey");
+
+// Debug / scripting handle (console): blastThrow.sim, blastThrow.fire(), blastThrow.fastForwardTo(t)
+window.blastThrow = { sim: sim, P: P, fire: fire, reset: reset, fastForwardTo: fastForwardTo, regenerate: regenerate, updateVisuals: updateVisuals, updateStats: updateStats, calibrate: calibrate };
+
+// Step 10) Drag & drop + auto-load
+var drop = document.getElementById("drop");
+container.addEventListener("dragover", function (e) { e.preventDefault(); drop.style.display = "flex"; });
+container.addEventListener("dragleave", function () { drop.style.display = "none"; });
+container.addEventListener("drop", function (e) { e.preventDefault(); drop.style.display = "none"; if (e.dataTransfer.files.length) loadKAP(e.dataTransfer.files[0], e.dataTransfer.files[0].name); });
+
+try {
+	var resp = await fetch("./SWELLFACTOR.kap");
+	if (!resp.ok) throw new Error("SWELLFACTOR.kap: " + resp.status);
+	await loadKAP(await resp.arrayBuffer(), "SWELLFACTOR.kap");
+} catch (e) {
+	document.getElementById("loading").textContent = "Drop a .kap file to begin (" + e.message + ")";
+}
+</script>
+</body>
+</html>

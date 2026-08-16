@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { resolve } from "path";
 
 export default defineConfig({
     root: "examples",
@@ -6,6 +7,13 @@ export default defineConfig({
     build: {
         outDir: "../dist-pages",
         emptyOutDir: true,
-        target: "esnext"
+        target: "esnext",
+        rollupOptions: {
+            input: {
+                index: resolve(__dirname, "examples/index.html"),
+                throw: resolve(__dirname, "examples/throw.html"),
+                ripple: resolve(__dirname, "examples/ripple.html")
+            }
+        }
     }
 });

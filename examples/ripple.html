@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>blast-physics-js — Ripple Tank, IDI / FFT and Monitor Synthesis</title>
+<style>
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #d0d0d0; overflow: hidden; }
+	#app { display: flex; height: 100vh; }
+	#viewport { flex: 1; position: relative; background: #0b0b0e; }
+	#plan { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+	#info-panel { width: 330px; min-width: 300px; background: #111; border-left: 1px solid #333; padding: 10px 12px; font-size: 0.72rem; font-family: 'Courier New', monospace; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+	#info-panel h3 { color: #cc2222; font-size: 0.8rem; margin-bottom: 2px; }
+	#info-panel .stat { color: #999; line-height: 1.6; }
+	#info-panel .stat b { color: #d0d0d0; }
+	#info-panel hr { border: none; border-top: 1px solid #333; margin: 2px 0; }
+	#info-panel a { color: #6aa0ff; }
+	#info-panel canvas { width: 100%; height: 110px; background: #0b0b0e; border: 1px solid #2a2a2a; border-radius: 3px; display: block; }
+	#footer { position: absolute; left: 0; right: 0; bottom: 0; height: 26px; background: rgba(0,0,0,0.6); display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 0.72rem; }
+	#tprog { flex: 1; height: 8px; background: #333; border-radius: 4px; cursor: pointer; }
+	#tprog-fill { height: 100%; width: 0%; background: #cc2222; border-radius: 4px; }
+	#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #cc2222; font-size: 1.2rem; z-index: 100; }
+	#drop { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(204,34,34,0.25); font-size: 1.4rem; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="app">
+	<div id="viewport">
+		<canvas id="plan"></canvas>
+		<div id="loading">Loading SWELLFACTOR.kap…</div>
+		<div id="drop">Drop a .kap file</div>
+		<div id="footer"><span id="tD">t = 0 ms</span><div id="tprog"><div id="tprog-fill"></div></div><span id="sInf">—</span></div>
+	</div>
+	<div id="info-panel">
+		<h3>Ripple Tank — forward wave field</h3>
+		<div class="stat" id="stat-file">—</div>
+		<div class="stat">Click the plan to move the monitor ✚. Blue/red = signed ground motion (P then S front from every fired charge, site-law amplitude).</div>
+		<hr>
+		<h3>Inter-Detonation Interval</h3>
+		<canvas id="cIDI"></canvas>
+		<div class="stat" id="stat-idi">—</div>
+		<hr>
+		<h3>Spectrum — FFT of impulse train</h3>
+		<canvas id="cSpec"></canvas>
+		<div class="stat" id="stat-spec">—</div>
+		<hr>
+		<h3>Monitor — forward array L / T / V</h3>
+		<canvas id="cTrace"></canvas>
+		<div class="stat" id="stat-mon">—</div>
+		<hr>
+		<div class="stat"><a href="./throw.html">blast throw demo</a> · <a href="./index.html">volumetric vibration demo</a></div>
+	</div>
+</div>
+
+<script type="module">
+import GUI from "lil-gui";
+import { parseKAP, rippleAmplitude, rippleSourcesFromDecks, resolveRippleParams, rippleWaveFronts,
+         fireTimesFromDecks, computeIDI, computeSpectrum, dominantFrequencies, frequencyBand, FREQUENCY_BANDS,
+         runForwardArraySynthesis, sourcesFromDecks, poeFromPrediction, poeBand, evaluateReceptor, decksFromEntries } from "../src/index.js";
+
+// ── State ─────────────────────────────────────────────────────────────
+var P = {
+	K: 1140, B: 1.6, chargeExponent: 0.5, cp: 5000, cs: 2900, fP: 100, fS: 60, numCrests: 3, spRatio: 0.6,
+	waveletType: "ricker", displayComponent: "combined", cutoffDistance: 1.0,
+	gridCells: 110, maxSources: 250, ampClip: 200,
+	timeMs: 0, playing: false, playSpeed: 0.05,
+	monitorTargetPPV: 25, siteSigma: 0.22, seedKind: "berlage", fDom: 30, includeS: true, includeLove: false,
+	showFronts: false, showHoles: true
+};
+var kap = null, decks = [], sources = [], holesXY = [], bounds = null, lastFireS = 1, monitor = { x: 0, y: 0, z: 0 };
+var plan = document.getElementById("plan"), pctx = plan.getContext("2d");
+var img = null, field = null, gridW = 0, gridH = 0, cell = 1, ox = 0, oy = 0;
+var idiRes = null, specRes = null, faRes = null;
+var lastT = 0;
+
+function setStatus(t) { document.getElementById("sInf").textContent = t; }
+
+// ── Load ──────────────────────────────────────────────────────────────
+async function loadKAP(source, name) {
+	document.getElementById("loading").style.display = "block";
+	try {
+		kap = await parseKAP(source, { loadSurfaces: false });
+		decks = kap.decks;
+		holesXY = kap.holes.map(function (h) { return { x: h.collarX, y: h.collarY, t: h.firstFireMs != null ? h.firstFireMs : h.holeTime }; });
+		if (!decks.length) throw new Error("KAP has no charged decks — the ripple tank needs charging + timing");
+		bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+		var tMax = 0;
+		decks.forEach(function (d) {
+			var x = (d.topX + d.baseX) / 2, y = (d.topY + d.baseY) / 2;
+			if (x < bounds.minX) bounds.minX = x; if (x > bounds.maxX) bounds.maxX = x;
+			if (y < bounds.minY) bounds.minY = y; if (y > bounds.maxY) bounds.maxY = y;
+			if (d.timingMs > tMax) tMax = d.timingMs;
+		});
+		lastFireS = tMax / 1000;
+		var pad = Math.max(60, 0.35 * Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY));
+		bounds.minX -= pad; bounds.maxX += pad; bounds.minY -= pad; bounds.maxY += pad;
+		monitor = { x: bounds.maxX - pad * 0.4, y: (bounds.minY + bounds.maxY) / 2, z: decks[0].topZ };
+		P.timeMs = 0;
+		document.getElementById("stat-file").innerHTML = "File: <b>" + name + "</b><br>Holes: <b>" + kap.holes.length + "</b> · Charged decks: <b>" + decks.length + "</b><br>Fire window: <b>0–" + tMax.toFixed(0) + " ms</b>";
+		rebuildSources();
+		analyseTiming();
+		runMonitor();
+		setStatus("Ready — press play or scrub the bar");
+	} catch (e) {
+		console.error(e);
+		setStatus("Load error: " + e.message);
+	}
+	document.getElementById("loading").style.display = "none";
+}
+
+function rebuildSources() {
+	var all = rippleSourcesFromDecks(decks);
+	var step = Math.max(1, Math.ceil(all.length / P.maxSources));
+	sources = step === 1 ? all : all.filter(function (_, i) { return i % step === 0; });
+	// Shift the source clock so t=0 is the first fire
+	var t0 = Infinity; all.forEach(function (s) { if (s.fireS < t0) t0 = s.fireS; });
+	sources = sources.map(function (s) { return { x: s.x, y: s.y, z: s.z, Q: s.Q, fireS: s.fireS - t0 }; });
+	setupGrid();
+}
+
+// ── Grid / plan mapping ───────────────────────────────────────────────
+function resize() {
+	plan.width = plan.clientWidth * devicePixelRatio; plan.height = plan.clientHeight * devicePixelRatio;
+	setupGrid();
+}
+function setupGrid() {
+	if (!bounds) return;
+	var W = plan.width, H = plan.height;
+	var bw = bounds.maxX - bounds.minX, bh = bounds.maxY - bounds.minY;
+	var scale = Math.min(W / bw, H / bh);
+	cell = Math.max(bw, bh) / P.gridCells;                 // metres per grid cell
+	gridW = Math.ceil(bw / cell); gridH = Math.ceil(bh / cell);
+	field = new Float32Array(gridW * gridH);
+	img = pctx.createImageData(gridW, gridH);
+	ox = (W - bw * scale) / 2; oy = (H - bh * scale) / 2;
+	plan._scale = scale;
+	drawFrame(true);
+}
+function worldToPx(x, y) { return [ox + (x - bounds.minX) * plan._scale, oy + (bounds.maxY - y) * plan._scale]; }
+function pxToWorld(px, py) { return [bounds.minX + (px - ox) / plan._scale, bounds.maxY - (py - oy) / plan._scale]; }
+
+// ── Ripple field ──────────────────────────────────────────────────────
+function computeField(tS) {
+	var rp = Object.assign(resolveRippleParams(P), { _resolved: true });
+	var pt = { x: 0, y: 0, z: monitor.z };
+	var clip = P.ampClip;
+	var data = img.data;
+	for (var j = 0; j < gridH; j++) {
+		pt.y = bounds.maxY - (j + 0.5) * cell;
+		for (var i = 0; i < gridW; i++) {
+			pt.x = bounds.minX + (i + 0.5) * cell;
+			var u = rippleAmplitude(pt, tS, sources, rp);
+			field[j * gridW + i] = u;
+			var t = Math.max(-1, Math.min(1, u / clip));
+			var q = (j * gridW + i) * 4;
+			if (t >= 0) { data[q] = 20 + 235 * t; data[q + 1] = 20 + 40 * t; data[q + 2] = 24; }
+			else { data[q] = 20; data[q + 1] = 30 - 30 * t; data[q + 2] = 24 - 231 * t; }
+			data[q + 3] = 255;
+		}
+	}
+}
+
+var off = document.createElement("canvas");
+function drawFrame(recompute) {
+	if (!bounds || !img) return;
+	var W = plan.width, H = plan.height;
+	pctx.fillStyle = "#0b0b0e"; pctx.fillRect(0, 0, W, H);
+	if (recompute) computeField(P.timeMs / 1000);
+	off.width = gridW; off.height = gridH;
+	off.getContext("2d").putImageData(img, 0, 0);
+	pctx.imageSmoothingEnabled = true;
+	pctx.drawImage(off, ox, oy, (bounds.maxX - bounds.minX) * plan._scale, (bounds.maxY - bounds.minY) * plan._scale);
+	// wave fronts
+	if (P.showFronts) {
+		var wf = rippleWaveFronts(P.timeMs / 1000, sources, P);
+		pctx.lineWidth = 1;
+		wf.forEach(function (w) {
+			if (!w.fired) return;
+			var c = worldToPx(w.x, w.y);
+			pctx.strokeStyle = "rgba(255,255,255,0.35)"; pctx.setLineDash([]);
+			pctx.beginPath(); pctx.arc(c[0], c[1], w.rP * plan._scale, 0, 2 * Math.PI); pctx.stroke();
+			pctx.strokeStyle = "rgba(255,255,255,0.2)"; pctx.setLineDash([4, 4]);
+			pctx.beginPath(); pctx.arc(c[0], c[1], w.rS * plan._scale, 0, 2 * Math.PI); pctx.stroke();
+		});
+		pctx.setLineDash([]);
+	}
+	// holes coloured by fire time
+	if (P.showHoles) {
+		var tMin = Infinity, tMax = -Infinity;
+		holesXY.forEach(function (h) { if (h.t < tMin) tMin = h.t; if (h.t > tMax) tMax = h.t; });
+		var range = (tMax - tMin) || 1;
+		var nowMs = P.timeMs + tMin;
+		holesXY.forEach(function (h) {
+			var c = worldToPx(h.x, h.y);
+			var f = (h.t - tMin) / range;
+			pctx.fillStyle = h.t <= nowMs ? "hsl(" + (200 - 200 * f) + ",90%,60%)" : "rgba(120,120,130,0.6)";
+			pctx.beginPath(); pctx.arc(c[0], c[1], 2.2 * devicePixelRatio, 0, 2 * Math.PI); pctx.fill();
+		});
+	}
+	// monitor
+	var m = worldToPx(monitor.x, monitor.y);
+	pctx.strokeStyle = "#ffdd33"; pctx.lineWidth = 2 * devicePixelRatio;
+	pctx.beginPath(); pctx.moveTo(m[0] - 8, m[1]); pctx.lineTo(m[0] + 8, m[1]); pctx.moveTo(m[0], m[1] - 8); pctx.lineTo(m[0], m[1] + 8); pctx.stroke();
+	pctx.beginPath(); pctx.arc(m[0], m[1], 6 * devicePixelRatio, 0, 2 * Math.PI); pctx.stroke();
+	document.getElementById("tD").textContent = "t = " + P.timeMs.toFixed(0) + " ms";
+	document.getElementById("tprog-fill").style.width = Math.min(100, P.timeMs / ((lastFireS + 0.5) * 1000) * 100) + "%";
+}
+
+// ── Timing analysis charts ────────────────────────────────────────────
+function chart(canvasId) {
+	var c = document.getElementById(canvasId);
+	c.width = c.clientWidth * devicePixelRatio; c.height = c.clientHeight * devicePixelRatio;
+	var ctx = c.getContext("2d");
+	ctx.fillStyle = "#0b0b0e"; ctx.fillRect(0, 0, c.width, c.height);
+	return { c: c, ctx: ctx, W: c.width, H: c.height, pad: 6 * devicePixelRatio };
+}
+function analyseTiming() {
+	var ft = fireTimesFromDecks(decks);
+	idiRes = computeIDI(ft.times, 1);
+	specRes = computeSpectrum(ft.times, { sampleRateHz: 1000, maxHz: 200, weights: ft.weights });
+	// IDI stems
+	var g = chart("cIDI");
+	var t0 = ft.times[0], t1 = ft.times[ft.times.length - 1] || 1;
+	var yMax = Math.max(1, Math.min(250, idiRes.maxInterval));
+	FREQUENCY_BANDS.slice().reverse().forEach(function (b) {
+		var dtLo = b.maxHz === Infinity ? 0 : 1000 / b.maxHz, dtHi = b.minHz > 0 ? 1000 / b.minHz : yMax;
+		var y0 = g.H - g.pad - Math.min(yMax, dtHi) / yMax * (g.H - 2 * g.pad), y1 = g.H - g.pad - Math.min(yMax, dtLo) / yMax * (g.H - 2 * g.pad);
+		g.ctx.fillStyle = b.colour; g.ctx.globalAlpha = 0.12; g.ctx.fillRect(g.pad, y0, g.W - 2 * g.pad, Math.max(0, y1 - y0)); g.ctx.globalAlpha = 1;
+	});
+	for (var i = 1; i < idiRes.fireTimesSorted.length; i++) {
+		var dt = idiRes.intervalAtTime[i]; if (!(dt >= 0)) continue;
+		var x = g.pad + (idiRes.fireTimesSorted[i] - t0) / (t1 - t0 || 1) * (g.W - 2 * g.pad);
+		var y = g.H - g.pad - Math.min(dt, yMax) / yMax * (g.H - 2 * g.pad);
+		g.ctx.strokeStyle = frequencyBand(dt > 0 ? 1000 / dt : Infinity).colour;
+		g.ctx.beginPath(); g.ctx.moveTo(x, g.H - g.pad); g.ctx.lineTo(x, y); g.ctx.stroke();
+	}
+	var dom = dominantFrequencies(idiRes, 3);
+	document.getElementById("stat-idi").innerHTML = "median Δt <b>" + idiRes.medianMs.toFixed(1) + " ms</b> · mean <b>" + idiRes.meanMs.toFixed(1) + " ms</b> · max <b>" + idiRes.maxInterval.toFixed(0) + " ms</b><br>dominant: " +
+		dom.map(function (d) { return "<b>" + d.intervalMs + " ms</b> (" + d.freqHz.toFixed(0) + " Hz ×" + d.count + ")"; }).join(", ");
+	// Spectrum
+	var s = chart("cSpec");
+	var mMax = 0; specRes.mag.forEach(function (v, k) { if (k > 0 && v > mMax) mMax = v; });
+	FREQUENCY_BANDS.forEach(function (b) {
+		var x0 = s.pad + Math.min(200, b.minHz) / 200 * (s.W - 2 * s.pad), x1 = s.pad + Math.min(200, b.maxHz === Infinity ? 200 : b.maxHz) / 200 * (s.W - 2 * s.pad);
+		s.ctx.fillStyle = b.colour; s.ctx.globalAlpha = 0.12; s.ctx.fillRect(x0, s.pad, x1 - x0, s.H - 2 * s.pad); s.ctx.globalAlpha = 1;
+	});
+	s.ctx.strokeStyle = "#e8e8e8"; s.ctx.lineWidth = 1 * devicePixelRatio; s.ctx.beginPath();
+	specRes.freqs.forEach(function (f, k) {
+		if (k === 0) return;
+		var x = s.pad + f / 200 * (s.W - 2 * s.pad), y = s.H - s.pad - (mMax > 0 ? specRes.mag[k] / mMax : 0) * (s.H - 2 * s.pad);
+		if (k === 1) s.ctx.moveTo(x, y); else s.ctx.lineTo(x, y);
+	});
+	s.ctx.stroke();
+	document.getElementById("stat-spec").innerHTML = "mass-weighted · 0–200 Hz · N=" + specRes.N + "<br>peaks: " + specRes.peaks.map(function (p) { return "<b>" + p.freq.toFixed(1) + " Hz</b>"; }).join(", ");
+}
+
+// ── Monitor synthesis ────────────────────────────────────────────────
+function runMonitor() {
+	if (!decks.length) return;
+	var src = sourcesFromDecks(decks, kap.holes);
+	var tMin = Infinity, tMax = 0; src.forEach(function (s) { if (s.fireTimeMs < tMin) tMin = s.fireTimeMs; if (s.fireTimeMs > tMax) tMax = s.fireTimeMs; });
+	var dur = (tMax - tMin) / 1000 + 1.5;
+	faRes = runForwardArraySynthesis({
+		holes: src, monitor: monitor, fs: 1024, durationS: dur,
+		physics: { cp: P.cp, cs: P.cs, K: P.K, B: P.B, E: P.chargeExponent, inclS: P.includeS, spRatio: P.spRatio },
+		love: { include: P.includeLove, factor: 0.3, freqHz: 2, vMps: 800 },
+		seedSpec: { kind: P.seedKind, params: { fDomHz: P.fDom, durationMs: 300, damping: 0.1 } },
+		cutoffSD: 1.0, skipFFT: true
+	});
+	var g = chart("cTrace");
+	var N = faRes.L.length, peak = Math.max(faRes.stats.LPeak, faRes.stats.TPeak, faRes.stats.VPeak) || 1;
+	var comps = [["L", faRes.L, "#ff6b6b"], ["T", faRes.T, "#6bff8f"], ["V", faRes.V, "#6ba8ff"]];
+	comps.forEach(function (cmp, ci) {
+		var band = (g.H - 2 * g.pad) / 3, mid = g.pad + band * (ci + 0.5);
+		g.ctx.strokeStyle = cmp[2]; g.ctx.lineWidth = 1 * devicePixelRatio; g.ctx.beginPath();
+		var step = Math.max(1, Math.floor(N / g.W));
+		for (var i = 0; i < N; i += step) {
+			var x = g.pad + i / N * (g.W - 2 * g.pad), y = mid - cmp[1][i] / peak * band * 0.48;
+			if (i === 0) g.ctx.moveTo(x, y); else g.ctx.lineTo(x, y);
+		}
+		g.ctx.stroke();
+		g.ctx.fillStyle = cmp[2]; g.ctx.font = (10 * devicePixelRatio) + "px monospace"; g.ctx.fillText(cmp[0], g.pad + 2, mid - band * 0.3);
+	});
+	var st = faRes.stats;
+	var poe = poeFromPrediction(st.peakVectorSum, P.monitorTargetPPV, P.siteSigma);
+	var rec = evaluateReceptor(monitor, decksFromEntries(decks), { K: P.K, B: P.B, chargeExponent: P.chargeExponent, distanceMode: "3D", outputMode: "A" });
+	document.getElementById("stat-mon").innerHTML =
+		"Monitor <b>" + monitor.x.toFixed(1) + ", " + monitor.y.toFixed(1) + "</b> · closest deck <b>" + (st.closest ? st.closest.distance3D.toFixed(0) : "—") + " m</b><br>" +
+		"PVS <b>" + st.peakVectorSum.toFixed(2) + " mm/s</b> @ " + (st.peakVectorSumTimeS + faRes.tShift).toFixed(2) + " s · L " + st.LPeak.toFixed(1) + " · T " + st.TPeak.toFixed(1) + " · V " + st.VPeak.toFixed(1) + "<br>" +
+		"site-law dominant deck <b>" + rec.ppvMax.toFixed(2) + " mm/s</b> (hole " + rec.dominantHoleIndex + ")<br>" +
+		"PoE(V > " + P.monitorTargetPPV + " mm/s, σ " + P.siteSigma + ") = <b>" + (poe ? (poe.P * 100).toFixed(1) + "% — " + poeBand(poe.P).label : "—") + "</b><br>" +
+		"polarisation " + st.polarisationDeg.toFixed(1) + "° · geometric brg " + st.geometricBearingDeg.toFixed(0) + "° · seed " + st.seedKind;
+}
+
+// ── Animation ────────────────────────────────────────────────────────
+function animate(ts) {
+	requestAnimationFrame(animate);
+	var dt = Math.min((ts - lastT) / 1000, 0.1); lastT = ts;
+	if (P.playing && bounds) {
+		P.timeMs += dt * 1000 * P.playSpeed;
+		if (P.timeMs > (lastFireS + 0.5) * 1000) P.timeMs = 0;
+		drawFrame(true);
+	}
+}
+requestAnimationFrame(animate);
+
+// ── UI ───────────────────────────────────────────────────────────────
+var gui = new GUI({ title: "Ripple Tank Controls", width: 290, container: document.getElementById("viewport") });
+gui.domElement.style.position = "absolute"; gui.domElement.style.top = "0px"; gui.domElement.style.left = "0px"; gui.domElement.style.maxHeight = "calc(100% - 26px)"; gui.domElement.style.overflowY = "auto";
+var redraw = function () { drawFrame(true); };
+var fT = gui.addFolder("Time");
+fT.add(P, "playing").name("Play").listen();
+fT.add(P, "playSpeed", 0.01, 1, 0.01).name("Playback (sim s / real s)");
+fT.add(P, "timeMs", 0, 5000, 1).name("Time (ms)").listen().onChange(redraw);
+var fW = gui.addFolder("Wave field");
+fW.add(P, "waveletType", ["ricker", "gaussian", "damped", "berlage"]).name("Wavelet").onChange(redraw);
+fW.add(P, "displayComponent", ["combined", "p", "s"]).name("Component").onChange(redraw);
+fW.add(P, "cp", 1500, 7000, 50).name("cp (m/s)").onChange(function () { redraw(); runMonitor(); });
+fW.add(P, "cs", 800, 4000, 50).name("cs (m/s)").onChange(function () { redraw(); runMonitor(); });
+fW.add(P, "fP", 10, 300, 5).name("fP visual (Hz)").onChange(redraw);
+fW.add(P, "fS", 5, 200, 5).name("fS visual (Hz)").onChange(redraw);
+fW.add(P, "numCrests", 1, 10, 1).name("Crests").onChange(redraw);
+fW.add(P, "spRatio", 0, 1.5, 0.05).name("S/P ratio").onChange(redraw);
+fW.add(P, "ampClip", 10, 2000, 10).name("Colour clip (mm/s)").onChange(redraw);
+fW.add(P, "showFronts").name("Wave-front rings").onChange(redraw);
+fW.add(P, "showHoles").name("Holes").onChange(redraw);
+var fS = gui.addFolder("Site law");
+fS.add(P, "K", 100, 5000, 10).name("K").onChange(function () { redraw(); runMonitor(); });
+fS.add(P, "B", 0.8, 2.5, 0.01).name("B").onChange(function () { redraw(); runMonitor(); });
+fS.add(P, "chargeExponent", 0.3, 0.8, 0.01).name("charge exponent").onChange(function () { redraw(); runMonitor(); });
+var fM = gui.addFolder("Monitor synthesis");
+fM.add(P, "seedKind", ["berlage", "damped", "ricker", "twoterm"]).name("Seed").onChange(runMonitor);
+fM.add(P, "fDom", 5, 120, 1).name("fDom (Hz)").onChange(runMonitor);
+fM.add(P, "includeS").name("Include S").onChange(runMonitor);
+fM.add(P, "includeLove").name("Include Love").onChange(runMonitor);
+fM.add(P, "monitorTargetPPV", 1, 200, 1).name("Limit V_β (mm/s)").onChange(runMonitor);
+fM.add(P, "siteSigma", 0.05, 0.5, 0.005).name("Site σ (log10)").onChange(runMonitor);
+var fG = gui.addFolder("Performance");
+fG.add(P, "gridCells", 40, 220, 10).name("Grid cells").onFinishChange(setupGrid);
+fG.add(P, "maxSources", 20, 1000, 10).name("Max sources").onFinishChange(rebuildSources);
+fG.close();
+
+plan.addEventListener("click", function (e) {
+	if (!bounds) return;
+	var r = plan.getBoundingClientRect();
+	var w = pxToWorld((e.clientX - r.left) * devicePixelRatio, (e.clientY - r.top) * devicePixelRatio);
+	monitor.x = w[0]; monitor.y = w[1];
+	drawFrame(false); runMonitor();
+});
+document.getElementById("tprog").addEventListener("pointerdown", function (e) {
+	var r = e.currentTarget.getBoundingClientRect();
+	P.timeMs = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (lastFireS + 0.5) * 1000;
+	drawFrame(true);
+});
+window.addEventListener("resize", resize);
+var drop = document.getElementById("drop"), vp = document.getElementById("viewport");
+vp.addEventListener("dragover", function (e) { e.preventDefault(); drop.style.display = "flex"; });
+vp.addEventListener("dragleave", function () { drop.style.display = "none"; });
+vp.addEventListener("drop", function (e) { e.preventDefault(); drop.style.display = "none"; if (e.dataTransfer.files.length) loadKAP(e.dataTransfer.files[0], e.dataTransfer.files[0].name); });
+window.rippleDemo = { P: P, drawFrame: drawFrame, runMonitor: runMonitor, get sources() { return sources; }, get monitor() { return monitor; } };
+
+resize();
+try {
+	var resp = await fetch("./SWELLFACTOR.kap");
+	if (!resp.ok) throw new Error("SWELLFACTOR.kap: " + resp.status);
+	await loadKAP(await resp.arrayBuffer(), "SWELLFACTOR.kap");
+	// Time slider range follows the pattern
+	gui.controllersRecursive().forEach(function (c) { if (c.property === "timeMs") c.max((lastFireS + 0.5) * 1000); });
+} catch (e) {
+	document.getElementById("loading").textContent = "Drop a .kap file to begin (" + e.message + ")";
+}
+</script>
+</body>
+</html>

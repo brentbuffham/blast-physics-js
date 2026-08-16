@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>A JavaScript blast physics engine for the mining industry.</strong><br/>
-  Vibration prediction · Damage modelling · Detonation simulation · Flyrock analysis · Blast movement
+  Vibration prediction · Frequency analysis · Ripple tank · Damage modelling · Detonation simulation · Flyrock analysis · Blast movement (muckpile)
 </p>
 
 <p align="center">
@@ -44,21 +44,31 @@ npm install blast-physics-js
 | Domain | Models | Output |
 |--------|--------|--------|
 | **Vibration** | PPV, PPV Per-Deck, Scaled Heelan, Blair Lite, Heelan Original, Blair & Minchinton | mm/s |
+| **Site law** | Regression (K50/K90/K95, B, σ), inverse (max allowable charge / distance), receptor evaluation (peak, coherence-window RMS, compliance, dominant hole), Blair 2011 Probability of Exceedance | mm/s, kg, P |
+| **Ripple tank** | Coherent forward wave field — P and S fronts from every charge, Ricker / Gaussian / damped / Berlage / measured wavelets | signed mm/s |
+| **Signal** | FFT, IDI, impulse-train spectrum, time-window (MIC) histogram, seed-wavelet superposition (linear + Blair non-linear), 3-component forward-array synthesis with Love waves, spectral-division signature deconvolution, detune / constrain | Hz, mm/s |
 | **Damage** | Holmberg-Persson, Jointed Rock | Damage index |
-| **Pressure** | Borehole Pressure, Powder Factor | MPa, kg/m³ |
+| **Pressure / energy** | Borehole Pressure, Powder Factor, Specific Explosive Energy | MPa, kg/m³, GJ/m³ |
 | **Detonation** | Multi-primer front propagation, Em computation | ms, kg^A |
-| **Flyrock** | Richards & Moore, Lundborg, McKenzie (SDoB) | metres, m/s |
-| **Movement** | Voxel-based blast throw with Rapier3D WASM physics | displacement vectors |
+| **Flyrock** | Richards & Moore, Lundborg, McKenzie (SDoB), volumetric SDoB grid, ballistics (range / apex / flight time / drag) | metres, m/s |
+| **Movement** | Voxel blast throw: Yang 3DMuck kinematic launch + sphere DEM transport (optional Rapier3D adapter), survey calibration | displacement vectors, swell, muckpile surface |
+| **IO** | Kirra `.kap` archives (holes, charging, primers, surfaces), Instantel / Texcel monitor CSVs | HoleEntry / DeckEntry / surfaces |
 
-## Demo
-
-Run the interactive demo to see all models in action:
+## Demos
 
 ```bash
 npm run dev
 ```
 
-Opens `examples/index.html` at http://localhost:5175 — vibration heatmaps, damage, pressure, flyrock, detonation, and ballistic envelope.
+Opens http://localhost:5175 with three pages:
+
+| Page | What it shows |
+|------|---------------|
+| `index.html` | Pre-computed volumetric vibration / damage / pressure point clouds with slice planes |
+| `throw.html` | **Blast throw / muckpile simulator** — loads `examples/SWELLFACTOR.kap` (531 holes, PREBLAST_VOLUME, SHELL, POSTBLAST_MUCKPILE), voxelises the blast volume, launches blocks with Yang 3DMuck kinematics, runs the sphere DEM, and back-calculates Pe from the surveyed muckpile. Drop any Kirra `.kap` on it. |
+| `ripple.html` | **Ripple tank** wave field with wave-front rings, IDI stems, impulse-train FFT and a click-to-place monitor with L/T/V forward-array synthesis and PoE readout |
+
+The throw demo defaults are the calibrated "throw_4" settings (1.5 m voxels, Pe 1.0, b 1.5, relief steer 0.85, 40 ms window, restitution 0.1, friction 0.5, swell 1.4, 35 % size scatter).
 
 ## Quick Start
 
@@ -101,6 +111,38 @@ const model = new ScaledHeelanModel({
 
 const ppv = model.evaluate(point, deckEntries, holeEntries);
 const result = model.computeGrid(deckEntries, holeEntries, gridParams);
+```
+
+### Read a Kirra KAP and run the blast throw simulator
+
+```javascript
+import { parseKAP, BlastMovementSimulator } from 'blast-physics-js';
+
+const kap = await parseKAP(await file.arrayBuffer());   // { holes, decks, surfaces, products, raw }
+const sim = new BlastMovementSimulator({ voxelRes: 1.5, maxVoxels: 30000, Pe: 1.0, maxSwell: 1.4 });
+sim.load(kap);                 // throw directions, charge elements, confinement geometry
+sim.generateVoxels();          // voxelise PREBLAST_VOLUME / VOXEL-BLK*, nearest hole, launch velocities
+sim.run();                     // fixed 5 ms sub-steps until every fired block rests
+const r = sim.results();       // vectors, comShift, swell, heightfield.surface (Kirra-style triangulated surface)
+
+const cal = await sim.calibrate();   // secant-fit Pe to the surveyed POSTBLAST CoM throw
+```
+
+### Ripple tank, frequency analysis, receptor PPV
+
+```javascript
+import { RippleTankModel, fireTimesFromDecks, computeIDI, computeSpectrum,
+         evaluateReceptor, decksFromEntries, poeFromPrediction } from 'blast-physics-js';
+
+const ripple = new RippleTankModel({ K: 1140, B: 1.6, cp: 5000, cs: 2900, fP: 100, fS: 60 });
+const field = ripple.computeGrid(deckEntries, { minX, minY, rows, cols, cellX, cellY, elevation }, 0.25 /* s */);
+
+const { times, weights } = fireTimesFromDecks(deckEntries);
+const idi = computeIDI(times, 1);                                   // Δt histogram, median, dominant intervals
+const spec = computeSpectrum(times, { weights, maxHz: 200 });       // impulse-train FFT + peaks
+
+const rx = evaluateReceptor(monitor, decksFromEntries(deckEntries), { superposeRMS: true, coherenceMs: 8, outputMode: 'A' });
+const poe = poeFromPrediction(rx.value, 25 /* mm/s limit */, 0.22 /* site σ */);   // Blair 2011
 ```
 
 ### Web Worker (Blair time-domain)
@@ -162,6 +204,12 @@ One deck within a blast hole. Aligned to [Kirra's Charging System](https://githu
 
 > **Why two diameters?** COUPLED explosives fill the borehole — charge diameter equals hole diameter. DECOUPLED (packaged) explosives have an air gap — the charge diameter is the product's physical diameter, which is smaller. Pressure models need the borehole wall radius; mass calculations need the charge diameter. Both are carried per-deck.
 
+### From a Kirra KAP
+
+`parseKAP()` returns `{ holes, decks, surfaces, products, raw }`. Holes carry the extra Kirra fields `burden`, `spacing`, `gradeZ`, `massPerHole`, `rowID` and `firstFireMs` (earliest primer-resolved fire time). Deck `timingMs` is the primer's absolute fire time — electronic `delayMs`, or `holeTime + delayMs + lengthFromCollar / deliveryVod` for shock-tube / electric / cord cascades — and `primerFraction` locates the primer along the deck. Surfaces are `{ id, name, role, pos: Float64Array, idx: Uint32Array, np, nt }` in world coordinates.
+
+Monitor waveforms: `parseMonitorCSV(text)` reads Instantel Blastware / Micromate and Texcel Twf2CSV exports into `{ sampleRateHz, channels: { Tran, Vert, Long }, metadata }`.
+
 ## Vibration Model Hierarchy
 
 The library provides five vibration models with increasing fidelity and computational cost:
@@ -216,18 +264,48 @@ Three algorithms with increasing conservatism:
 
 3D shroud generation using the Chernigovskii ballistic envelope.
 
-## Blast Movement (Phase 5)
+## Site Law, Receptors and Probability of Exceedance
 
-Physics-based blast throw prediction — an open-source approach to the problem solved by Orica's OREPro 3D Predict.
+- **`fitSiteLaw`** — log-log least squares of `PPV = K·(D/Q^e)^−B` on monitoring observations → K50 / K90 / K95, B, R², residual σ, outlier flags.
+- **`maxAllowableCharge` / `distanceForPPV`** — inverse site law for charge design and clearance.
+- **`evaluateReceptor`** — every charged deck against a monitor: peak single-deck PPV, coherence-window RMS (±8 ms, gated by P-wave arrival), coherent seed-wavelet peak, dominant hole, contributors, compliance ratio and max allowable charge. Near-field clamp at SD = 1.0 m/kg^0.5 (Yang & Scovira 2007).
+- **`probabilityOfExceedance`** — Blair (2011) `P(V > V_β)` from the log₁₀ z-score with the correct Abramowitz & Stegun polynomial forms (verified against Blair Table 1 in the tests; the circulated Kearney and XLSX restatements are wrong). `normalQuantile` / `effectiveTargetForPoE` give the inverse (design to 1 % PoE).
 
-**Concept**: The vibration models provide the energy field (initial conditions). A WASM physics engine (Rapier3D) simulates the dynamics — voxelised rock mass with gravity, friction, collisions, and muckpile formation.
+## Ripple Tank
 
-**Workflow**:
-1. Import pre-blast surfaces from Kirra CAP file (blast block, pit shell, floor, free face)
-2. Voxelise rock mass within surface bounds (~48k voxels for a typical bench)
-3. Compute per-voxel initial velocities from PPV field + timing sequence
-4. Simulate forward with Rapier3D WASM rigid body dynamics
-5. Extract displacement vectors and predicted post-blast surface
+Coherent, phase-aware forward wave field: at time *t* every point sums the P and S contributions of every charge that has fired, with site-law amplitude and a causal wavelet at the arrival time. Fronts interfere constructively and destructively — the educational complement to the incoherent RMS heatmaps.
+
+```
+u(p,t) = Σ_i K·(D_i/Q_i^n)^−B · [ w(t − fire_i − D_i/cp, fP) + spRatio · w(t − fire_i − D_i/cs, fS) ]
+```
+
+Wavelets: causal Ricker (physical default), Gaussian bell, damped sinusoid, Berlage, or a measured geophone seed. `RippleTankModel.computeGrid` / `timeSeries` / `rippleWaveFronts`.
+
+## Signal Toolkit
+
+| Module | Contents |
+|--------|----------|
+| `signal/FFT.js` | radix-2 FFT / IFFT, single-sided magnitude, band peaks |
+| `signal/Wavelets.js` | Ricker, causal Ricker, Gaussian bell, damped sinusoid, Berlage, two-term P+S, measured resampling, seed bundles |
+| `signal/FrequencyAnalysis.js` | inter-detonation intervals, impulse-train spectrum, dominant frequencies, MIC time-window histogram, structural-resonance bands |
+| `signal/SeedSynthesis.js` | signature-hole superposition (uniform / √Q / site-law amplitude, two-term P/S arrivals, Blair 2008 non-linear damage attenuation) |
+| `signal/ForwardArray.js` | L / T / V synthesis at a monitor with P, S and Love waves, polarisation, peak vector sum, Gao 2015 near-field S correction |
+| `signal/SignatureDeconvolution.js` | Li & Silva-Castro (2017) spectral-division extraction of the single-hole signature |
+| `signal/Detune.js` | reproducible timing dither (uniform / triangular / positive), nonel palette snap, rolling-window event-rate constraint |
+
+## Blast Movement (Phase 5 — implemented)
+
+Physics-based blast throw / muckpile prediction — an open-source approach to the problem solved by Orica's OREPro 3D Predict. Ported from the Kirra blast-throw simulator (throw_4 generation).
+
+**Pipeline** (`BlastMovementSimulator`):
+1. `parseKAP` — holes, charging (mass per deck from geometry, primer-resolved fire times), and surfaces by role: `PREBLAST_VOLUME` / `VOXEL-BLK*` (material to blast), `SHELL` / `*REMAIN*` / `*MINUS*` (trusted confinement), `PREBLAST_SURFACE` / `*TOPO*` (fallback collision with lid/face exclusion), `POSTBLAST*` (survey reference)
+2. Voxelise the blast volume by column ray-casting (auto-coarsened to the block budget); fragmentation-shaped block size scatter
+3. **Kinematic loading — Yang 3DMuck** (Yang & Kavetsky 1990; Yang 2020): every explosive deck is split into charge elements; a block receives `|ΔV| = Pe·ρe·d²·Δl / (4·r^b)` from each element of every hole firing within the timing window of its dominant hole, summed vectorially. Confined momentum cancelled between cooperating charges is recovered and steered down the timing gradient (least-squares fit of fire time over neighbours → direction of relief). An energy-partition depth-zone model (`v0 = √(2ηE·PF/ρ)`) is available as an alternative.
+4. **Sphere DEM transport**: fixed 5 ms sub-steps, gravity, spatial-hash sphere contacts (mass ∝ ρr³), static shell collision, ground plane, in-flight bulking to the target swell factor, rest detection with re-activation on impact
+5. Results: displacement vectors (in-situ → final, world coordinates), volume-weighted centre-of-mass shift and bearing, achieved swell (prescribed and emergent), and a triangulated muckpile heightfield surface
+6. **Calibration**: `surveyTargets` rasterises PREBLAST_VOLUME / SHELL / POSTBLAST onto 2 m columns (swell = muck volume ÷ in-situ, CoM throw); `calibrate()` secant-fits Pe with three coarse headless runs. On SWELLFACTOR.kap: survey swell 1.43×, throw 34 m @ 130° → fitted Pe ≈ 1.5
+
+`RapierEngine` (`@dimforge/rapier3d-compat`, injected, not a dependency) swaps the transport for convex-hull rigid bodies with emergent swell. In calibration the sphere DEM reproduced the surveyed muckpile shape better, so it is the default.
 
 **Outputs**: Displacement vectors (equivalent to OREPro 3D's SmartVectors™) for block model transformation, and predicted post-blast muckpile topography.
 
@@ -238,49 +316,70 @@ blast-physics-js/
   src/
     index.js
     core/
-      ChargeColumn.js          DeckEntry.js            RadiationPattern.js
+      DeckEntry.js             HoleEntry.js            RadiationPattern.js
       Waveform.js              RockMass.js
     vibration/
       PPV.js                   PPVDeck.js              ScaledHeelan.js
       ScaledHeelanBlair.js     HeelanOriginal.js       BlairMinchinton.js
+      SiteLaw.js               ReceptorPPV.js          ProbabilityOfExceedance.js
+      RippleTank.js
+    signal/
+      FFT.js                   Wavelets.js             FrequencyAnalysis.js
+      SeedSynthesis.js         ForwardArray.js         SignatureDeconvolution.js
+      GaoNearFieldCorrection.js Detune.js
     damage/
       HolmbergPerssonDamage.js JointedRockDamage.js
     pressure/
-      BoreholePressure.js      PowderFactor.js
+      BoreholePressure.js      PowderFactor.js         SEE.js
     detonation/
       DetonationSimulator.js   EmComputation.js
     flyrock/
-      FlyrockTrajectory.js     FlyrockShroud.js
+      FlyrockTrajectory.js     FlyrockShroud.js        SDoB.js
+      Ballistics.js
     movement/
-      VoxelGrid.js             InitialVelocityField.js
-      BlastMovementSimulator.js DisplacementField.js    PostBlastSurface.js
+      BlastMovementSimulator.js Voxeliser.js           InitialVelocity.js
+      ThrowDirections.js       SphereDEM.js            ShellCollider.js
+      SurfaceMesh.js           Displacement.js         RapierEngine.js
+    io/
+      KAPReader.js             ZipReader.js            MonitorCSV.js
     workers/
       BlairHeavyWorker.js      FlyrockWorker.js
+  examples/
+    index.html  throw.html  ripple.html  SWELLFACTOR.kap
   test/
   dist/
 ```
 
 ## Implementation Roadmap
 
-| Phase | Version | Scope | Status |
-|-------|---------|-------|--------|
-| **1** | v0.1.0 | Core data structures + PPV site law + PPV per-deck | ✅ Complete |
-| **2** | v0.2.0 | Scaled Heelan + Blair Lite + Holmberg-Persson + Jointed Rock damage | ✅ Complete |
-| **3** | v0.3.0 | Blair & Minchinton time-domain + Web Workers + Heelan Original | ✅ Complete |
-| **4** | v1.0.0 | Detonation simulator + flyrock (R&M, Lundborg, McKenzie) + pressure + powder factor | ✅ Complete |
-| **5** | v2.0.0 | Blast movement: voxelisation, Rapier3D physics, displacement vectors, post-blast surface | 🔜 Planned |
+| Phase | Scope | Status |
+|-------|-------|--------|
+| **1** | Core data structures + PPV site law + PPV per-deck | ✅ Complete |
+| **2** | Scaled Heelan + Blair Lite + Holmberg-Persson + Jointed Rock damage | ✅ Complete |
+| **3** | Blair & Minchinton time-domain + Web Workers + Heelan Original | ✅ Complete |
+| **4** | Detonation simulator + flyrock (R&M, Lundborg, McKenzie) + pressure + powder factor | ✅ Complete |
+| **5** | Blast movement: KAP import, voxelisation, Yang 3DMuck launch, sphere DEM (+ optional Rapier), displacement vectors, muckpile surface, survey calibration | ✅ Complete (v0.2.0) |
+| **6** | Kirra analysis suite: ripple tank, FFT / IDI / spectrum, seed & forward-array synthesis, signature deconvolution, site-law regression, receptor PPV, Blair 2011 PoE, SDoB / SEE, detune | ✅ Complete (v0.2.0) |
 
 ## References
 
 - Blair, D.P. & Minchinton, A. (1996). *On the damage zone surrounding a single blasthole*. Fragblast-5, Montreal.
 - Blair, D.P. & Minchinton, A. (2006). *Near-field blast vibration models*. Fragblast-8, Santiago.
 - Blair, D.P. (2008). *Non-linear superposition models of blast vibration*. Int. J. Rock Mech. Min. Sci. 45, 235–247.
+- Blair, D.P. (2011). *A probabilistic analysis of vibration based on measured data and charge weight scaling*. EFEE 6th World Conf., Lisbon, 319–337.
 - Blair, D.P. (2015). *Wall control blasting*. Fragblast 11, Sydney.
 - Heelan, P.A. (1953). *Radiation from a cylindrical source of finite length*. Geophysics 18, 685–696.
 - Holmberg, R. & Persson, P.A. (1979). *Design of tunnel perimeter blasthole patterns to prevent rock damage*. Tunnelling '79, London.
+- Yang, R. & Scovira, D.S. (2007). *A model for near-field blast vibration based on signal broadening and amplitude attenuation*. EXPLO 2007, Wollongong.
+- Yang, R. & Kavetsky, A. (1990). *A three-dimensional model of muckpile formation and grade boundary movement in open pit blasting*. Int. J. Min. Geol. Eng. 8, 13–34; Yang, R. (2020) 3DMuck.
+- Anderson, D.A. (1989) / Hinzen, K.-G. (1988). Signature-hole linear superposition of blast vibration.
+- Aldridge, D.F. (1990). *The Berlage wavelet*. Geophysics 55, 1508–1511.
+- Li & Silva-Castro (2017). *Spectral division deconvolution of blast vibration signals for signature estimation*. ISEE 43rd Conf.
+- Gao, Q.D., Lu, W.B., Hu, Y.G., Chen, M. & Yan, P. (2015). *Comparison of the generation of shear wave with different simulation approaches*. Fragblast 11, Sydney, 79–87.
 - Chiappetta, R.F. & Treleven, J.P. (1997). *Scaled Depth of Burial concept for flyrock risk assessment*.
 - Richards, A.B. & Moore, A.J. (2004). *Flyrock control — by chance or design*. Proc. 30th ISEE Conf.
 - McKenzie, C. (2009/2022). *Flyrock range and fragment size prediction / validation*.
+- Siskind, D.E. et al. (1980). *Structure response and damage produced by ground vibration from surface mine blasting*. USBM RI 8507.
 
 ## Related Projects
 
