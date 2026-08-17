@@ -22,13 +22,8 @@
 	#info-panel .stat b { color: #d0d0d0; }
 	#info-panel hr { border: none; border-top: 1px solid #333; margin: 2px 0; }
 	#info-panel a { color: #6aa0ff; }
-	.warn { border: 1px solid #7a4a12; background: #241a0c; color: #d8a35a; border-radius: 4px; padding: 6px 8px; line-height: 1.5; }
-	.warn b { color: #ffc879; }
-	#banner {
-		position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 30;
-		background: rgba(36,26,12,0.92); border: 1px solid #7a4a12; color: #d8a35a;
-		font-size: 0.7rem; padding: 3px 12px; border-radius: 4px; pointer-events: none; white-space: nowrap;
-	}
+	.modelnote { border-left: 2px solid #3d5a80; background: #12161c; color: #90a4bd; border-radius: 3px; padding: 6px 9px; line-height: 1.55; }
+	.modelnote b { color: #b8cce4; }
 	#info-panel canvas { width: 100%; height: 110px; background: #0b0b0e; border: 1px solid #2a2a2a; border-radius: 3px; display: block; }
 	#footer { position: absolute; left: 0; right: 0; bottom: 0; height: 26px; background: rgba(0,0,0,0.6); display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 0.72rem; }
 	#tprog { flex: 1; height: 8px; background: #333; border-radius: 4px; cursor: pointer; }
@@ -49,22 +44,20 @@
 </nav>
 <div id="app">
 	<div id="viewport">
-		<div id="banner">Demonstration only — idealised wave analogue, not a rock-mass prediction</div>
 		<div id="loading">Loading SWELLFACTOR.kap…</div>
 		<div id="drop">Drop a .kap file</div>
 		<div id="footer"><span id="tD">t = 0 ms</span><div id="tprog"><div id="tprog-fill"></div></div><span id="sInf">—</span></div>
 	</div>
 	<div id="info-panel">
 		<h3>Ripple Tank — forward wave field</h3>
-		<div class="warn">
-			<b>Demonstration only.</b> This is a ripple-tank analogue, not a ground-motion
-			prediction. Every charge is collapsed to a <b>single point source</b> at its deck
-			midpoint — a 10.7 m column becomes one point — so it carries <b>no axial energy
-			profile</b>: stemming, charge mid and base are not distinguished. Wavefronts are
-			spherical at constant velocity through a uniform half-space, with no anisotropy,
-			no attenuation beyond site-law spreading, and no reflection, refraction, mode
-			conversion or free-face interaction. Real pulse propagation in rock does none of
-			this. Read it for <b>timing and interference geometry</b> only.
+		<div class="modelnote">
+			<b>How this differs from a blasthole.</b> The timing, interference and site-law
+			amplitudes are real. The <i>emission</i> is a ripple-tank analogue: each charge
+			radiates a <b>multi-crest wavelet</b>, where a real hole commits a
+			<b>single transient pulse</b>. Each deck is also collapsed to one point source at
+			its midpoint rather than radiating along the column, so there is no stemming /
+			charge / base energy profile. Reflection, refraction, mode conversion and
+			free-face interaction are not modelled.
 		</div>
 		<div class="stat" id="stat-file">—</div>
 		<div class="stat">Drag to orbit · scroll to zoom · click the surface to move the monitor ✚. Height and colour are signed ground motion (P then S front from every fired charge, site-law amplitude).</div>

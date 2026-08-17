@@ -44,10 +44,12 @@
 	.card ul { list-style: none; margin-top: 10px; font-size: 0.72rem; color: #777; font-family: 'Courier New', monospace; }
 	.card ul li { padding-left: 12px; position: relative; }
 	.card ul li::before { content: "·"; position: absolute; left: 2px; color: #555; }
-	.card ul li.caution { color: #d8a35a; margin-top: 6px; }
-	.card ul li.caution::before { content: "!"; color: #d8a35a; }
-	.note { border: 1px solid #7a4a12; background: #241a0c; color: #d8a35a; border-radius: 5px; padding: 10px 12px; font-size: 0.8rem; margin-top: 14px; }
-	.note b { color: #ffc879; }
+	.card ul li.caution { color: #7f93ad; margin-top: 6px; }
+	.card ul li.caution::before { content: "*"; color: #7f93ad; }
+	.note { border-left: 2px solid #3d5a80; background: #12161c; color: #90a4bd; border-radius: 4px; padding: 12px 14px; font-size: 0.82rem; margin-top: 18px; line-height: 1.65; }
+	.note b { color: #b8cce4; }
+	.note a { color: #6aa0ff; text-decoration: none; }
+	.note a:hover { text-decoration: underline; }
 
 	table { width: 100%; border-collapse: collapse; font-size: 0.78rem; font-family: 'Courier New', monospace; }
 	th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid #262626; }
@@ -120,7 +122,7 @@
 			<li>constructive / destructive timing interference</li>
 			<li>IDI histogram and dominant frequency</li>
 			<li>forward array L / T / V synthesis</li>
-			<li class="caution">demonstration analogue — not a rock prediction</li>
+			<li class="caution">wave analogue — see modelling note</li>
 		</ul>
 	</a>
 
@@ -155,13 +157,16 @@
 </p>
 
 <div class="note">
-	<b>These are demonstrations, not engineering predictions.</b> The ripple tank in particular
-	is an idealised wave analogue: every charge collapses to a single point source at its deck
-	midpoint, so it carries no axial energy profile and does not distinguish stemming from
-	charge or base. Wavefronts are spherical at constant velocity through a uniform half-space
-	— no anisotropy, no reflection, refraction, mode conversion or free-face interaction. Real
-	pulse propagation in rock behaves nothing like this. Use these pages to reason about timing,
-	geometry and model behaviour; do not use them to size a blast or clear an exclusion zone.
+	<b>Use and interpretation.</b> These are engineering calculations implemented from published
+	methods, and the source for each is linked above. Choosing a model that suits the ground,
+	calibrating its constants to your own site data, and validating output against measurement
+	remain the user's responsibility — as does any decision taken from the results. Supplied
+	under the MIT licence, without warranty of any kind.
+	<br><br>
+	One modelling note: the <a href="./ripple.html">ripple tank</a> is a wave <i>analogue</i>.
+	Its timing and interference behaviour is real, but each charge radiates a multi-crest
+	wavelet from a single point, where a real blasthole commits one transient pulse along the
+	whole charge column. It is documented on the page itself.
 </div>
 
 <footer>
