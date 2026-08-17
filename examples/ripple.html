@@ -15,7 +15,7 @@
 	#nav .spacer { flex: 1; }
 	#app { display: flex; height: calc(100vh - 34px); }
 	#viewport { flex: 1; position: relative; background: #0b0b0e; }
-	#plan { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+	#viewport > canvas { position: absolute; inset: 0; display: block; }
 	#info-panel { width: 330px; min-width: 300px; background: #111; border-left: 1px solid #333; padding: 10px 12px; font-size: 0.72rem; font-family: 'Courier New', monospace; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 	#info-panel h3 { color: #cc2222; font-size: 0.8rem; margin-bottom: 2px; }
 	#info-panel .stat { color: #999; line-height: 1.6; }
@@ -42,7 +42,6 @@
 </nav>
 <div id="app">
 	<div id="viewport">
-		<canvas id="plan"></canvas>
 		<div id="loading">Loading SWELLFACTOR.kap…</div>
 		<div id="drop">Drop a .kap file</div>
 		<div id="footer"><span id="tD">t = 0 ms</span><div id="tprog"><div id="tprog-fill"></div></div><span id="sInf">—</span></div>
@@ -50,7 +49,7 @@
 	<div id="info-panel">
 		<h3>Ripple Tank — forward wave field</h3>
 		<div class="stat" id="stat-file">—</div>
-		<div class="stat">Click the plan to move the monitor ✚. Blue/red = signed ground motion (P then S front from every fired charge, site-law amplitude).</div>
+		<div class="stat">Drag to orbit · scroll to zoom · click the surface to move the monitor ✚. Height and colour are signed ground motion (P then S front from every fired charge, site-law amplitude).</div>
 		<hr>
 		<h3>Inter-Detonation Interval</h3>
 		<canvas id="cIDI"></canvas>
@@ -67,6 +66,8 @@
 </div>
 
 <script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import GUI from "lil-gui";
 import { parseKAP, rippleAmplitude, rippleSourcesFromDecks, resolveRippleParams, rippleWaveFronts,
          fireTimesFromDecks, computeIDI, computeSpectrum, dominantFrequencies, frequencyBand, FREQUENCY_BANDS,
@@ -77,17 +78,45 @@ var P = {
 	K: 1140, B: 1.6, chargeExponent: 0.5, cp: 5000, cs: 2900, fP: 100, fS: 60, numCrests: 3, spRatio: 0.6,
 	waveletType: "ricker", displayComponent: "combined", cutoffDistance: 1.0,
 	gridCells: 110, maxSources: 250, ampClip: 200,
+	waveHeight: 0, wireframe: false, showGrid: true,
 	timeMs: 0, playing: false, playSpeed: 0.05,
 	monitorTargetPPV: 25, siteSigma: 0.22, seedKind: "berlage", fDom: 30, includeS: true, includeLove: false,
 	showFronts: false, showHoles: true
 };
 var kap = null, decks = [], sources = [], holesXY = [], bounds = null, lastFireS = 1, monitor = { x: 0, y: 0, z: 0 };
-var plan = document.getElementById("plan"), pctx = plan.getContext("2d");
-var img = null, field = null, gridW = 0, gridH = 0, cell = 1, ox = 0, oy = 0;
+var field = null, gridW = 0, gridH = 0;
 var idiRes = null, specRes = null, faRes = null;
-var lastT = 0;
+var lastT = 0, waveHeightCtrl = null, clipCtrl = null;
 
 function setStatus(t) { document.getElementById("sInf").textContent = t; }
+
+// ── 3D scene ──────────────────────────────────────────────────────────
+// The wave field is a displaced mesh rather than a flat image, so the tank
+// can be orbited and zoomed. Rendered in local coordinates about the pattern
+// centre — KAP coordinates are real-world grid (478000, 6772000 …) and lose
+// too much precision once baked into Float32 vertex buffers.
+var container = document.getElementById("viewport");
+var scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0b0e);
+var camera = new THREE.PerspectiveCamera(50, 1, 0.5, 20000);
+camera.up.set(0, 0, 1);
+var renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+container.appendChild(renderer.domElement);
+renderer.domElement.style.cursor = "crosshair";
+var controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+var keyLight = new THREE.DirectionalLight(0xffffff, 0.85);
+keyLight.position.set(0.4, -1, 1.2);
+scene.add(keyLight);
+
+var origin = { x: 0, y: 0 };
+var surfMesh = null, surfGeo = null, surfMat = null;
+var holePts = null, frontLines = null, monitorMark = null, gridHelper = null;
+
+function toLocalX(x) { return x - origin.x; }
+function toLocalY(y) { return y - origin.y; }
 
 // ── Load ──────────────────────────────────────────────────────────────
 async function loadKAP(source, name) {
@@ -110,8 +139,17 @@ async function loadKAP(source, name) {
 		bounds.minX -= pad; bounds.maxX += pad; bounds.minY -= pad; bounds.maxY += pad;
 		monitor = { x: bounds.maxX - pad * 0.4, y: (bounds.minY + bounds.maxY) / 2, z: decks[0].topZ };
 		P.timeMs = 0;
+		// Render about the pattern centre so the mesh sits at the world origin
+		origin.x = (bounds.minX + bounds.maxX) / 2;
+		origin.y = (bounds.minY + bounds.maxY) / 2;
+		P.waveHeight = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * 0.06;
+		if (waveHeightCtrl) waveHeightCtrl.max(P.waveHeight * 5).updateDisplay();
 		document.getElementById("stat-file").innerHTML = "File: <b>" + name + "</b><br>Holes: <b>" + kap.holes.length + "</b> · Charged decks: <b>" + decks.length + "</b><br>Fire window: <b>0–" + tMax.toFixed(0) + " ms</b>";
+		buildHoles();
 		rebuildSources();
+		calibrateClip();
+		drawFrame(true);
+		fitCamera();
 		analyseTiming();
 		runMonitor();
 		setStatus("Ready — press play or scrub the bar");
@@ -132,90 +170,231 @@ function rebuildSources() {
 	setupGrid();
 }
 
-// ── Grid / plan mapping ───────────────────────────────────────────────
+// ── Viewport / surface construction ───────────────────────────────────
 function resize() {
-	plan.width = plan.clientWidth * devicePixelRatio; plan.height = plan.clientHeight * devicePixelRatio;
-	setupGrid();
+	var w = container.clientWidth, h = container.clientHeight;
+	if (!w || !h) return;
+	camera.aspect = w / h;
+	camera.updateProjectionMatrix();
+	renderer.setSize(w, h);
 }
+
 function setupGrid() {
 	if (!bounds) return;
-	var W = plan.width, H = plan.height;
 	var bw = bounds.maxX - bounds.minX, bh = bounds.maxY - bounds.minY;
-	var scale = Math.min(W / bw, H / bh);
-	cell = Math.max(bw, bh) / P.gridCells;                 // metres per grid cell
-	gridW = Math.ceil(bw / cell); gridH = Math.ceil(bh / cell);
+	var cellSize = Math.max(bw, bh) / P.gridCells;
+	gridW = Math.max(2, Math.ceil(bw / cellSize) + 1);
+	gridH = Math.max(2, Math.ceil(bh / cellSize) + 1);
 	field = new Float32Array(gridW * gridH);
-	img = pctx.createImageData(gridW, gridH);
-	ox = (W - bw * scale) / 2; oy = (H - bh * scale) / 2;
-	plan._scale = scale;
+
+	if (surfMesh) { scene.remove(surfMesh); surfGeo.dispose(); surfMat.dispose(); }
+	// PlaneGeometry emits row 0 at +Y and column 0 at -X, so vertex index
+	// j*gridW + i maps straight onto (maxY - j·dy, minX + i·dx) — the same
+	// row-major, top-down order the flat version used for its ImageData.
+	surfGeo = new THREE.PlaneGeometry(bw, bh, gridW - 1, gridH - 1);
+	surfGeo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(gridW * gridH * 3), 3));
+	surfMat = new THREE.MeshPhongMaterial({
+		vertexColors: true, side: THREE.DoubleSide, shininess: 20, wireframe: P.wireframe
+	});
+	surfMesh = new THREE.Mesh(surfGeo, surfMat);
+	scene.add(surfMesh);
 	drawFrame(true);
 }
-function worldToPx(x, y) { return [ox + (x - bounds.minX) * plan._scale, oy + (bounds.maxY - y) * plan._scale]; }
-function pxToWorld(px, py) { return [bounds.minX + (px - ox) / plan._scale, bounds.maxY - (py - oy) / plan._scale]; }
 
-// ── Ripple field ──────────────────────────────────────────────────────
+// ── Ripple field → vertex displacement + colour ───────────────────────
 function computeField(tS) {
 	var rp = Object.assign(resolveRippleParams(P), { _resolved: true });
 	var pt = { x: 0, y: 0, z: monitor.z };
 	var clip = P.ampClip;
-	var data = img.data;
+	var dx = (bounds.maxX - bounds.minX) / (gridW - 1);
+	var dy = (bounds.maxY - bounds.minY) / (gridH - 1);
+	var pos = surfGeo.attributes.position.array;
+	var col = surfGeo.attributes.color.array;
+	var hScale = P.waveHeight;
 	for (var j = 0; j < gridH; j++) {
-		pt.y = bounds.maxY - (j + 0.5) * cell;
+		pt.y = bounds.maxY - j * dy;
 		for (var i = 0; i < gridW; i++) {
-			pt.x = bounds.minX + (i + 0.5) * cell;
+			pt.x = bounds.minX + i * dx;
 			var u = rippleAmplitude(pt, tS, sources, rp);
-			field[j * gridW + i] = u;
-			var t = Math.max(-1, Math.min(1, u / clip));
-			var q = (j * gridW + i) * 4;
-			if (t >= 0) { data[q] = 20 + 235 * t; data[q + 1] = 20 + 40 * t; data[q + 2] = 24; }
-			else { data[q] = 20; data[q + 1] = 30 - 30 * t; data[q + 2] = 24 - 231 * t; }
-			data[q + 3] = 255;
+			var k = j * gridW + i;
+			field[k] = u;
+			// Soft saturation, not a hard clamp. Clipping at ±1 was invisible
+			// on the flat version but in relief it carves the over-range
+			// regions into flat-topped mesas; tanh keeps the ripple structure
+			// near the sources while staying bounded. 1.5 puts u = clip at
+			// ~0.9 so the colour range is close to the flat version's.
+			var t = Math.tanh(1.5 * u / clip);
+			pos[k * 3 + 2] = t * hScale;
+			// Same signed ramp as the flat version: red crest, blue trough
+			if (t >= 0) { col[k * 3] = (20 + 235 * t) / 255; col[k * 3 + 1] = (20 + 40 * t) / 255; col[k * 3 + 2] = 24 / 255; }
+			else { col[k * 3] = 20 / 255; col[k * 3 + 1] = (30 - 30 * t) / 255; col[k * 3 + 2] = (24 - 231 * t) / 255; }
 		}
 	}
+	surfGeo.attributes.position.needsUpdate = true;
+	surfGeo.attributes.color.needsUpdate = true;
+	surfGeo.computeVertexNormals();
+	surfGeo.boundingSphere = null;
 }
 
-var off = document.createElement("canvas");
+// Pick the clip from the field itself. A fixed 200 mm/s was fine flat — the
+// saturated area just read as solid colour — but in relief everything above
+// the clip flattens into plateaus, so the default has to match the blast.
+// Sampled mid-sequence, where the pattern is most fully engaged.
+function calibrateClip() {
+	if (!bounds || !surfGeo || !sources.length) return;
+	var keep = P.timeMs;
+	// One instant is not representative — only the annulus the wavefronts
+	// currently occupy carries amplitude, so a single sample swung the 98th
+	// percentile by ~8x depending on when it landed. Sample across the
+	// sequence and take the strongest.
+	var best = 0;
+	for (var s = 1; s <= 6; s++) {
+		P.timeMs = lastFireS * 1000 * (s / 7);
+		computeField(P.timeMs / 1000);
+		var mags = [];
+		for (var i = 0; i < field.length; i++) {
+			var a = Math.abs(field[i]);
+			if (a > 0) mags.push(a);
+		}
+		if (!mags.length) continue;
+		mags.sort(function (a, b) { return a - b; });
+		var p98 = mags[Math.floor(0.98 * (mags.length - 1))];
+		if (p98 > best) best = p98;
+	}
+	if (best > 0) {
+		P.ampClip = Math.max(10, Math.round(best / 10) * 10);
+		if (clipCtrl) clipCtrl.max(Math.max(2000, P.ampClip * 4)).updateDisplay();
+	}
+	P.timeMs = keep;
+}
+
+// ── Overlays ──────────────────────────────────────────────────────────
+function buildHoles() {
+	if (holePts) { scene.remove(holePts); holePts.geometry.dispose(); holePts.material.dispose(); holePts = null; }
+	if (!holesXY.length || !bounds) return;
+	var span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+	var pos = new Float32Array(holesXY.length * 3);
+	for (var i = 0; i < holesXY.length; i++) {
+		pos[i * 3] = toLocalX(holesXY[i].x);
+		pos[i * 3 + 1] = toLocalY(holesXY[i].y);
+		pos[i * 3 + 2] = 0;
+	}
+	var g = new THREE.BufferGeometry();
+	g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+	g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(holesXY.length * 3), 3));
+	holePts = new THREE.Points(g, new THREE.PointsMaterial({
+		size: span * 0.007, sizeAttenuation: true, vertexColors: true, depthTest: false
+	}));
+	holePts.renderOrder = 3;
+	scene.add(holePts);
+}
+
+var _hc = new THREE.Color();
+function updateHoles() {
+	if (!holePts) return;
+	holePts.visible = P.showHoles;
+	if (!P.showHoles) return;
+	var tMin = Infinity, tMax = -Infinity;
+	holesXY.forEach(function (h) { if (h.t < tMin) tMin = h.t; if (h.t > tMax) tMax = h.t; });
+	var range = (tMax - tMin) || 1;
+	var nowMs = P.timeMs + tMin;
+	var col = holePts.geometry.attributes.color.array;
+	for (var i = 0; i < holesXY.length; i++) {
+		var h = holesXY[i];
+		if (h.t <= nowMs) _hc.setHSL(((200 - 200 * (h.t - tMin) / range) % 360) / 360, 0.9, 0.6);
+		else _hc.setRGB(0.47, 0.47, 0.51);
+		col[i * 3] = _hc.r; col[i * 3 + 1] = _hc.g; col[i * 3 + 2] = _hc.b;
+	}
+	holePts.geometry.attributes.color.needsUpdate = true;
+}
+
+// Wave fronts share one LineSegments buffer — 250 sources × 2 rings as
+// separate objects would be 500 draw calls every frame.
+var FRONT_SEGS = 72;
+function updateFronts() {
+	if (!P.showFronts) { if (frontLines) frontLines.visible = false; return; }
+	var wf = rippleWaveFronts(P.timeMs / 1000, sources, P).filter(function (w) { return w.fired; });
+	var need = Math.max(3, wf.length * 2 * FRONT_SEGS * 2 * 3);
+	if (!frontLines || frontLines.geometry.attributes.position.array.length < need) {
+		if (frontLines) { scene.remove(frontLines); frontLines.geometry.dispose(); frontLines.material.dispose(); }
+		var g = new THREE.BufferGeometry();
+		g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(need), 3));
+		frontLines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({
+			color: 0xffffff, transparent: true, opacity: 0.3, depthTest: false
+		}));
+		frontLines.renderOrder = 2;
+		scene.add(frontLines);
+	}
+	var arr = frontLines.geometry.attributes.position.array;
+	var n = 0;
+	for (var wi = 0; wi < wf.length; wi++) {
+		var w = wf[wi], cx = toLocalX(w.x), cy = toLocalY(w.y);
+		var radii = [w.rP, w.rS];
+		for (var ri = 0; ri < 2; ri++) {
+			var r = radii[ri];
+			if (!(r > 0)) continue;
+			for (var s = 0; s < FRONT_SEGS; s++) {
+				var a0 = s / FRONT_SEGS * Math.PI * 2, a1 = (s + 1) / FRONT_SEGS * Math.PI * 2;
+				arr[n++] = cx + Math.cos(a0) * r; arr[n++] = cy + Math.sin(a0) * r; arr[n++] = 0;
+				arr[n++] = cx + Math.cos(a1) * r; arr[n++] = cy + Math.sin(a1) * r; arr[n++] = 0;
+			}
+		}
+	}
+	frontLines.geometry.setDrawRange(0, n / 3);
+	frontLines.geometry.attributes.position.needsUpdate = true;
+	frontLines.visible = true;
+}
+
+function updateMonitorMark() {
+	if (!bounds) return;
+	if (!monitorMark) {
+		var span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+		var r = span * 0.008;
+		monitorMark = new THREE.Group();
+		monitorMark.add(new THREE.Mesh(
+			new THREE.SphereGeometry(r, 14, 14),
+			new THREE.MeshBasicMaterial({ color: 0xffdd33, depthTest: false })
+		));
+		// A mast, so the marker stays findable once the surface wobbles over it
+		var lg = new THREE.BufferGeometry();
+		lg.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 0, -r * 8, 0, 0, r * 12]), 3));
+		monitorMark.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0xffdd33, depthTest: false })));
+		monitorMark.renderOrder = 4;
+		scene.add(monitorMark);
+	}
+	monitorMark.position.set(toLocalX(monitor.x), toLocalY(monitor.y), 0);
+}
+
+function updateGridHelper() {
+	if (!bounds) return;
+	if (!gridHelper) {
+		var span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+		gridHelper = new THREE.GridHelper(span, 20, 0x333340, 0x1e1e26);
+		gridHelper.rotation.x = Math.PI / 2;          // GridHelper is XZ by default
+		gridHelper.position.z = -P.waveHeight * 1.4;
+		gridHelper.material.transparent = true;
+		gridHelper.material.opacity = 0.5;
+		scene.add(gridHelper);
+	}
+	gridHelper.position.z = -P.waveHeight * 1.4;
+	gridHelper.visible = P.showGrid;
+}
+
+function fitCamera() {
+	if (!bounds) return;
+	var d = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+	controls.target.set(0, 0, 0);
+	camera.position.set(0, -d * 0.8, d * 0.62);
+	controls.update();
+}
+
 function drawFrame(recompute) {
-	if (!bounds || !img) return;
-	var W = plan.width, H = plan.height;
-	pctx.fillStyle = "#0b0b0e"; pctx.fillRect(0, 0, W, H);
+	if (!bounds || !surfGeo) return;
 	if (recompute) computeField(P.timeMs / 1000);
-	off.width = gridW; off.height = gridH;
-	off.getContext("2d").putImageData(img, 0, 0);
-	pctx.imageSmoothingEnabled = true;
-	pctx.drawImage(off, ox, oy, (bounds.maxX - bounds.minX) * plan._scale, (bounds.maxY - bounds.minY) * plan._scale);
-	// wave fronts
-	if (P.showFronts) {
-		var wf = rippleWaveFronts(P.timeMs / 1000, sources, P);
-		pctx.lineWidth = 1;
-		wf.forEach(function (w) {
-			if (!w.fired) return;
-			var c = worldToPx(w.x, w.y);
-			pctx.strokeStyle = "rgba(255,255,255,0.35)"; pctx.setLineDash([]);
-			pctx.beginPath(); pctx.arc(c[0], c[1], w.rP * plan._scale, 0, 2 * Math.PI); pctx.stroke();
-			pctx.strokeStyle = "rgba(255,255,255,0.2)"; pctx.setLineDash([4, 4]);
-			pctx.beginPath(); pctx.arc(c[0], c[1], w.rS * plan._scale, 0, 2 * Math.PI); pctx.stroke();
-		});
-		pctx.setLineDash([]);
-	}
-	// holes coloured by fire time
-	if (P.showHoles) {
-		var tMin = Infinity, tMax = -Infinity;
-		holesXY.forEach(function (h) { if (h.t < tMin) tMin = h.t; if (h.t > tMax) tMax = h.t; });
-		var range = (tMax - tMin) || 1;
-		var nowMs = P.timeMs + tMin;
-		holesXY.forEach(function (h) {
-			var c = worldToPx(h.x, h.y);
-			var f = (h.t - tMin) / range;
-			pctx.fillStyle = h.t <= nowMs ? "hsl(" + (200 - 200 * f) + ",90%,60%)" : "rgba(120,120,130,0.6)";
-			pctx.beginPath(); pctx.arc(c[0], c[1], 2.2 * devicePixelRatio, 0, 2 * Math.PI); pctx.fill();
-		});
-	}
-	// monitor
-	var m = worldToPx(monitor.x, monitor.y);
-	pctx.strokeStyle = "#ffdd33"; pctx.lineWidth = 2 * devicePixelRatio;
-	pctx.beginPath(); pctx.moveTo(m[0] - 8, m[1]); pctx.lineTo(m[0] + 8, m[1]); pctx.moveTo(m[0], m[1] - 8); pctx.lineTo(m[0], m[1] + 8); pctx.stroke();
-	pctx.beginPath(); pctx.arc(m[0], m[1], 6 * devicePixelRatio, 0, 2 * Math.PI); pctx.stroke();
+	updateFronts();
+	updateHoles();
+	updateMonitorMark();
+	updateGridHelper();
 	document.getElementById("tD").textContent = "t = " + P.timeMs.toFixed(0) + " ms";
 	document.getElementById("tprog-fill").style.width = Math.min(100, P.timeMs / ((lastFireS + 0.5) * 1000) * 100) + "%";
 }
@@ -315,6 +494,8 @@ function animate(ts) {
 		if (P.timeMs > (lastFireS + 0.5) * 1000) P.timeMs = 0;
 		drawFrame(true);
 	}
+	controls.update();
+	renderer.render(scene, camera);
 }
 requestAnimationFrame(animate);
 
@@ -335,9 +516,17 @@ fW.add(P, "fP", 10, 300, 5).name("fP visual (Hz)").onChange(redraw);
 fW.add(P, "fS", 5, 200, 5).name("fS visual (Hz)").onChange(redraw);
 fW.add(P, "numCrests", 1, 10, 1).name("Crests").onChange(redraw);
 fW.add(P, "spRatio", 0, 1.5, 0.05).name("S/P ratio").onChange(redraw);
-fW.add(P, "ampClip", 10, 2000, 10).name("Colour clip (mm/s)").onChange(redraw);
+clipCtrl = fW.add(P, "ampClip", 10, 2000, 10).name("Amplitude clip (mm/s)").onChange(redraw);
+fW.add({ auto: function () { calibrateClip(); drawFrame(true); } }, "auto").name("◎ Auto clip from field");
 fW.add(P, "showFronts").name("Wave-front rings").onChange(redraw);
 fW.add(P, "showHoles").name("Holes").onChange(redraw);
+var f3 = gui.addFolder("3D view");
+waveHeightCtrl = f3.add(P, "waveHeight", 0, 100, 0.5).name("Wave height (m)").onChange(function () {
+	updateGridHelper(); drawFrame(true);
+});
+f3.add(P, "wireframe").name("Wireframe").onChange(function (v) { if (surfMat) surfMat.wireframe = v; });
+f3.add(P, "showGrid").name("Ground grid").onChange(updateGridHelper);
+f3.add({ home: fitCamera }, "home").name("⌂ Reset view");
 var fS = gui.addFolder("Site law");
 fS.add(P, "K", 100, 5000, 10).name("K").onChange(function () { redraw(); runMonitor(); });
 fS.add(P, "B", 0.8, 2.5, 0.01).name("B").onChange(function () { redraw(); runMonitor(); });
@@ -354,12 +543,37 @@ fG.add(P, "gridCells", 40, 220, 10).name("Grid cells").onFinishChange(setupGrid)
 fG.add(P, "maxSources", 20, 1000, 10).name("Max sources").onFinishChange(rebuildSources);
 fG.close();
 
-plan.addEventListener("click", function (e) {
-	if (!bounds) return;
-	var r = plan.getBoundingClientRect();
-	var w = pxToWorld((e.clientX - r.left) * devicePixelRatio, (e.clientY - r.top) * devicePixelRatio);
-	monitor.x = w[0]; monitor.y = w[1];
-	drawFrame(false); runMonitor();
+// Click to place the monitor. OrbitControls owns the same button, so a press
+// only counts as a click if the pointer barely moved.
+var rayc = new THREE.Raycaster();
+var ptr = new THREE.Vector2();
+var groundPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+var hitPoint = new THREE.Vector3();
+var pressAt = null;
+
+renderer.domElement.addEventListener("pointerdown", function (e) {
+	pressAt = { x: e.clientX, y: e.clientY };
+});
+
+renderer.domElement.addEventListener("pointerup", function (e) {
+	if (!bounds || !pressAt) return;
+	var moved = Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y);
+	pressAt = null;
+	if (moved > 5) return;
+
+	var r = renderer.domElement.getBoundingClientRect();
+	ptr.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+	ptr.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+	rayc.setFromCamera(ptr, camera);
+
+	var hit = surfMesh ? rayc.intersectObject(surfMesh, false)[0] : null;
+	if (hit) hitPoint.copy(hit.point);
+	else if (!rayc.ray.intersectPlane(groundPlane, hitPoint)) return;
+
+	monitor.x = hitPoint.x + origin.x;
+	monitor.y = hitPoint.y + origin.y;
+	drawFrame(false);
+	runMonitor();
 });
 document.getElementById("tprog").addEventListener("pointerdown", function (e) {
 	var r = e.currentTarget.getBoundingClientRect();
@@ -371,7 +585,12 @@ var drop = document.getElementById("drop"), vp = document.getElementById("viewpo
 vp.addEventListener("dragover", function (e) { e.preventDefault(); drop.style.display = "flex"; });
 vp.addEventListener("dragleave", function () { drop.style.display = "none"; });
 vp.addEventListener("drop", function (e) { e.preventDefault(); drop.style.display = "none"; if (e.dataTransfer.files.length) loadKAP(e.dataTransfer.files[0], e.dataTransfer.files[0].name); });
-window.rippleDemo = { P: P, drawFrame: drawFrame, runMonitor: runMonitor, get sources() { return sources; }, get monitor() { return monitor; } };
+window.rippleDemo = {
+	P: P, drawFrame: drawFrame, runMonitor: runMonitor, calibrateClip: calibrateClip, fitCamera: fitCamera,
+	get sources() { return sources; }, get monitor() { return monitor; },
+	get field() { return field; }, get grid() { return { w: gridW, h: gridH }; },
+	get scene() { return scene; }, get surface() { return surfMesh; }, get camera() { return camera; }
+};
 
 resize();
 try {
