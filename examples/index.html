@@ -2,433 +2,158 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>blast-physics-js — 3D Demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>blast-physics-js — Demos</title>
 <style>
 	* { margin: 0; padding: 0; box-sizing: border-box; }
-	body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #d0d0d0; overflow: hidden; }
-	#app { display: flex; height: 100vh; }
-	#viewport { flex: 1; position: relative; }
-	#info-panel {
-		width: 240px; min-width: 200px; background: #111; border-left: 1px solid #333;
-		padding: 10px 12px; font-size: 0.72rem; font-family: 'Courier New', monospace;
-		overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+	body {
+		font-family: system-ui, sans-serif; background: #1a1a1a; color: #d0d0d0;
+		line-height: 1.6; padding: 0 0 64px;
 	}
-	#info-panel h3 { color: #cc2222; font-size: 0.8rem; margin-bottom: 4px; }
-	#info-panel .stat { color: #999; line-height: 1.6; }
-	#info-panel .stat b { color: #d0d0d0; }
-	#info-panel hr { border: none; border-top: 1px solid #333; margin: 4px 0; }
-	#legend-bar { height: 14px; border-radius: 3px; margin-top: 4px; }
-	.legend-row { display: flex; justify-content: space-between; font-size: 0.65rem; color: #888; margin-top: 2px; }
+	#nav {
+		position: sticky; top: 0; z-index: 10;
+		height: 34px; background: #0d0d0d; border-bottom: 1px solid #333;
+		display: flex; align-items: center; gap: 4px; padding: 0 10px; font-size: 0.74rem;
+	}
+	#nav .brand { font-family: 'Courier New', monospace; color: #888; margin-right: 14px; white-space: nowrap; }
+	#nav .brand b { color: #cc2222; font-weight: normal; }
+	#nav a { color: #aaa; text-decoration: none; padding: 4px 10px; border-radius: 4px; border: 1px solid transparent; white-space: nowrap; }
+	#nav a:hover { color: #fff; background: #1e1e1e; border-color: #3a3a3a; }
+	#nav a.on { color: #fff; background: #2a1414; border-color: #cc2222; }
+	#nav .spacer { flex: 1; }
+	.wrap { max-width: 940px; margin: 0 auto; padding: 44px 24px 0; }
+	header { border-bottom: 1px solid #333; padding-bottom: 24px; margin-bottom: 32px; }
+	h1 { font-size: 1.9rem; font-weight: 600; color: #f0f0f0; letter-spacing: -0.01em; }
+	h1 span { color: #cc2222; }
+	.tag { color: #999; margin-top: 8px; max-width: 660px; }
+	.meta { margin-top: 14px; font-size: 0.78rem; color: #777; font-family: 'Courier New', monospace; }
+	.meta a { color: #6aa0ff; text-decoration: none; }
+	.meta a:hover { text-decoration: underline; }
+
+	h2 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: #cc2222; margin: 36px 0 14px; }
+
+	.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; }
+	.card {
+		display: block; background: #111; border: 1px solid #333; border-radius: 6px;
+		padding: 18px 18px 16px; text-decoration: none; color: inherit; transition: border-color .15s, transform .15s;
+	}
+	.card:hover { border-color: #cc2222; transform: translateY(-2px); }
+	.card h3 { font-size: 1rem; color: #f0f0f0; margin-bottom: 6px; }
+	.card p { font-size: 0.82rem; color: #999; }
+	.card .kicker { font-size: 0.68rem; font-family: 'Courier New', monospace; color: #cc2222; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+	.card ul { list-style: none; margin-top: 10px; font-size: 0.72rem; color: #777; font-family: 'Courier New', monospace; }
+	.card ul li { padding-left: 12px; position: relative; }
+	.card ul li::before { content: "·"; position: absolute; left: 2px; color: #555; }
+
+	table { width: 100%; border-collapse: collapse; font-size: 0.78rem; font-family: 'Courier New', monospace; }
+	th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid #262626; }
+	th { color: #777; font-weight: normal; }
+	td b { color: #d0d0d0; font-weight: normal; }
+	td.u { color: #777; }
+
+	footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid #333; font-size: 0.76rem; color: #777; }
+	footer a { color: #6aa0ff; text-decoration: none; }
+	footer a:hover { text-decoration: underline; }
+	code { background: #000; border: 1px solid #2a2a2a; border-radius: 3px; padding: 1px 5px; font-size: 0.78rem; color: #bbb; }
 </style>
 </head>
 <body>
-<div id="app">
-	<div id="viewport">
-		<div id="loading" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#cc2222;font-size:1.2rem;z-index:100;">Loading data...</div>
-	</div>
-	<div id="info-panel">
-		<h3>Blast Data</h3>
-		<div class="stat" id="stat-blast">—</div>
-		<hr>
-		<h3>Model Output</h3>
-		<div class="stat" id="stat-model">—</div>
-		<div id="legend-bar"></div>
-		<div class="legend-row"><span>0</span><span id="legend-max">—</span></div>
-		<hr>
-		<h3>Hole Details</h3>
-		<div class="stat" id="stat-holes">—</div>
-	</div>
+<nav id="nav">
+	<span class="brand">blast<b>-</b>physics<b>-</b>js</span>
+	<a href="./index.html" class="on">Demos</a>
+	<a href="./analysis.html">Analysis</a>
+	<a href="./throw.html">Throw</a>
+	<a href="./ripple.html">Ripple Tank</a>
+	<span class="spacer"></span>
+	<a href="https://github.com/brentbuffham/blast-physics-js" target="_blank" rel="noopener">GitHub</a>
+</nav>
+<div class="wrap">
+
+<header>
+	<h1>blast<span>-</span>physics<span>-</span>js</h1>
+	<p class="tag">
+		Zero-dependency JavaScript blast engineering physics — vibration, damage, detonation,
+		flyrock, frequency analysis and blast movement. Runs in the browser as ES modules and in
+		Node.js. Every demo below computes from the library itself, in your browser.
+	</p>
+	<p class="meta">
+		MIT · <a href="https://github.com/brentbuffham/blast-physics-js">github</a>
+		· <a href="https://blastingapps.com">blastingapps.com</a>
+		· <a href="https://kirra-design.com">kirra-design.com</a>
+	</p>
+</header>
+
+<h2>Interactive demos</h2>
+<div class="grid">
+
+	<a class="card" href="./analysis.html">
+		<div class="kicker">Vibration · Damage · Energy</div>
+		<h3>Blast Analysis — Cross-Sections</h3>
+		<p>Three draggable orthogonal planes slice a live-computed field through the blast. Eleven models, evaluated on demand from the KAP.</p>
+		<ul>
+			<li>drag XY / XZ / YZ planes through the volume</li>
+			<li>PPV, Heelan, Holmberg-Persson, powder factor, SDoB</li>
+			<li>optional volumetric point cloud</li>
+		</ul>
+	</a>
+
+	<a class="card" href="./throw.html">
+		<div class="kicker">Blast Movement</div>
+		<h3>Blast Throw &amp; Muckpile</h3>
+		<p>Yang 3DMuck kinematic launch feeding a sphere DEM transport solver. Fire the pattern and watch the muckpile build.</p>
+		<ul>
+			<li>voxelised burden blocks, timed initiation</li>
+			<li>swell and displacement vectors</li>
+			<li>calibrate against pre/post-blast surfaces</li>
+		</ul>
+	</a>
+
+	<a class="card" href="./ripple.html">
+		<div class="kicker">Timing · Signal</div>
+		<h3>Ripple Tank &amp; Frequency</h3>
+		<p>Forward wave field from the initiation sequence, with inter-detonation interval, FFT spectrum and a synthesised monitor trace.</p>
+		<ul>
+			<li>constructive / destructive timing interference</li>
+			<li>IDI histogram and dominant frequency</li>
+			<li>forward array L / T / V synthesis</li>
+		</ul>
+	</a>
+
 </div>
 
-<script type="module">
-import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import GUI from "lil-gui";
+<h2>Models in the analysis demo</h2>
+<table>
+	<tr><th>Model</th><th>Unit</th><th>Module</th></tr>
+	<tr><td><b>PPV (Site Law)</b></td><td class="u">mm/s</td><td class="u">vibration/PPV</td></tr>
+	<tr><td><b>PPV Per-Deck</b></td><td class="u">mm/s</td><td class="u">vibration/PPVDeck</td></tr>
+	<tr><td><b>Scaled Heelan</b></td><td class="u">mm/s</td><td class="u">vibration/ScaledHeelan</td></tr>
+	<tr><td><b>Scaled Heelan Blair</b></td><td class="u">mm/s</td><td class="u">vibration/ScaledHeelanBlair</td></tr>
+	<tr><td><b>Heelan Original</b></td><td class="u">mm/s</td><td class="u">vibration/HeelanOriginal</td></tr>
+	<tr><td><b>Holmberg-Persson</b></td><td class="u">DI</td><td class="u">damage/HolmbergPerssonDamage</td></tr>
+	<tr><td><b>Jointed Rock</b></td><td class="u">ratio</td><td class="u">damage/JointedRockDamage</td></tr>
+	<tr><td><b>Borehole Pressure</b></td><td class="u">MPa</td><td class="u">pressure/BoreholePressure</td></tr>
+	<tr><td><b>Powder Factor</b></td><td class="u">kg/m³</td><td class="u">pressure/PowderFactor</td></tr>
+	<tr><td><b>Specific Energy</b></td><td class="u">GJ/m³</td><td class="u">pressure/SEE</td></tr>
+	<tr><td><b>Scaled Depth of Burial</b></td><td class="u">m/kg<sup>1/3</sup></td><td class="u">flyrock/SDoB</td></tr>
+</table>
+<p style="margin-top:12px;font-size:0.78rem;color:#777;">
+	Blair &amp; Minchinton is in the library but is not offered live — it costs roughly
+	0.75 s per evaluated point, so it belongs in an offline pass. See
+	<code>examples/precompute.mjs</code>.
+</p>
 
-// Step 1) Load blast data + pre-computed point cloud values
-var blastData, pointData;
-try {
-	var bdResp = await fetch("./blast-data.json");
-	var pdResp = await fetch("./precomputed-points.json");
-	if (!bdResp.ok) throw new Error("blast-data.json: " + bdResp.status);
-	if (!pdResp.ok) throw new Error("precomputed-points.json: " + pdResp.status);
-	blastData = await bdResp.json();
-	pointData = await pdResp.json();
-} catch (e) {
-	document.getElementById("loading").textContent = "Error: " + e.message;
-	throw e;
-}
-document.getElementById("loading").textContent = "Building scene...";
+<h2>Using the library</h2>
+<p style="font-size:0.86rem;color:#999;max-width:660px;">
+	All three demos load the same <code>SWELLFACTOR.kap</code> sample. Drop your own Kirra
+	<code>.kap</code> file onto any viewport to run the models against your own blast — nothing
+	is uploaded, parsing and evaluation happen locally.
+</p>
 
-var holes = blastData.holes;
-var decks = blastData.decks;
-var centroidX = blastData.centroidX || 0;
-var centroidY = blastData.centroidY || 0;
+<footer>
+	Brent Buffham · MIT licence ·
+	<a href="https://github.com/brentbuffham/blast-physics-js">source on GitHub</a>
+</footer>
 
-// Step 2) Three.js setup
-var container = document.getElementById("viewport");
-var scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000000);
-
-var camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
-camera.up.set(0, 0, 1);
-
-var renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.localClippingEnabled = true;
-container.appendChild(renderer.domElement);
-
-var controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-
-scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-var dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
-dirLight.position.set(10, -15, 25);
-scene.add(dirLight);
-
-// Step 3) Jet/thermal colormap (blue -> cyan -> green -> yellow -> red)
-function jetColormap(t) {
-	if (t <= 0) return [0, 0, 128];
-	if (t >= 1) return [128, 0, 0];
-	var r, g, b;
-	if (t < 0.125) {
-		r = 0; g = 0; b = 128 + t / 0.125 * 127;
-	} else if (t < 0.375) {
-		var u = (t - 0.125) / 0.25;
-		r = 0; g = Math.round(u * 255); b = 255;
-	} else if (t < 0.625) {
-		var u = (t - 0.375) / 0.25;
-		r = Math.round(u * 255); g = 255; b = Math.round((1 - u) * 255);
-	} else if (t < 0.875) {
-		var u = (t - 0.625) / 0.25;
-		r = 255; g = Math.round((1 - u) * 255); b = 0;
-	} else {
-		var u = (t - 0.875) / 0.125;
-		r = Math.round(255 - u * 127); g = 0; b = 0;
-	}
-	return [r, g, b];
-}
-
-function createLegendGradient() {
-	var c = document.createElement("canvas");
-	c.width = 200; c.height = 14;
-	var ctx = c.getContext("2d");
-	for (var i = 0; i < 200; i++) {
-		var rgb = jetColormap(i / 200);
-		ctx.fillStyle = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
-		ctx.fillRect(i, 0, 2, 14);
-	}
-	document.getElementById("legend-bar").style.backgroundImage = "url(" + c.toDataURL() + ")";
-	document.getElementById("legend-bar").style.backgroundSize = "100% 100%";
-}
-createLegendGradient();
-
-// Step 4) Rebuild the same 3D box grid as precompute.mjs
-var box = pointData.box;
-var totalPoints = box.nx * box.ny * box.nz;
-var meshPositions = new Float32Array(totalPoints * 3);
-var meshColors = new Float32Array(totalPoints * 3);
-
-var idx = 0;
-for (var iz = 0; iz < box.nz; iz++) {
-	for (var iy = 0; iy < box.ny; iy++) {
-		for (var ix = 0; ix < box.nx; ix++) {
-			meshPositions[idx * 3]     = box.minX + ix * box.spacing;
-			meshPositions[idx * 3 + 1] = box.minY + iy * box.spacing;
-			meshPositions[idx * 3 + 2] = box.minZ + iz * box.spacing;
-			idx++;
-		}
-	}
-}
-
-var meshGeo = new THREE.BufferGeometry();
-meshGeo.setAttribute("position", new THREE.BufferAttribute(meshPositions, 3));
-meshGeo.setAttribute("color", new THREE.BufferAttribute(meshColors, 3));
-
-// Step 4b) Cross-section clipping planes (XY=Z-slice, YZ=X-slice, XZ=Y-slice)
-var boxExtX = (box.nx - 1) * box.spacing;
-var boxExtY = (box.ny - 1) * box.spacing;
-var boxExtZ = (box.nz - 1) * box.spacing;
-
-var clipXY_lo = new THREE.Plane(new THREE.Vector3(0, 0,  1), 0);
-var clipXY_hi = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
-var clipYZ_lo = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
-var clipYZ_hi = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
-var clipXZ_lo = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-var clipXZ_hi = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
-
-var activeClipPlanes = [];
-
-function updateSlicePlanes() {
-	activeClipPlanes.length = 0;
-	if (guiState.xyEnabled) {
-		var center = box.minZ + guiState.xyPosition * boxExtZ;
-		var half = guiState.xyWidth * boxExtZ * 0.5;
-		clipXY_lo.constant = -(center - half);
-		clipXY_hi.constant = (center + half);
-		activeClipPlanes.push(clipXY_lo, clipXY_hi);
-	}
-	if (guiState.yzEnabled) {
-		var center = box.minX + guiState.yzPosition * boxExtX;
-		var half = guiState.yzWidth * boxExtX * 0.5;
-		clipYZ_lo.constant = -(center - half);
-		clipYZ_hi.constant = (center + half);
-		activeClipPlanes.push(clipYZ_lo, clipYZ_hi);
-	}
-	if (guiState.xzEnabled) {
-		var center = box.minY + guiState.xzPosition * boxExtY;
-		var half = guiState.xzWidth * boxExtY * 0.5;
-		clipXZ_lo.constant = -(center - half);
-		clipXZ_hi.constant = (center + half);
-		activeClipPlanes.push(clipXZ_lo, clipXZ_hi);
-	}
-	meshMat.clippingPlanes = activeClipPlanes.length > 0 ? activeClipPlanes : [];
-	meshMat.needsUpdate = true;
-}
-
-var meshMat = new THREE.PointsMaterial({
-	vertexColors: true, size: 0.5, sizeAttenuation: true,
-	transparent: true, opacity: 0.8, clippingPlanes: []
-});
-var meshObj = new THREE.Points(meshGeo, meshMat);
-meshObj.name = "volumeCloud";
-scene.add(meshObj);
-
-// Step 5) Paint pre-computed model values onto point colors
-var GRADIENT_CAPS = { "mm/s": 3000, "MPa": 35, "DI": 15, "ratio": 15, "kg/m3": 50 };
-
-// Step 5a) Steep-falloff models use log scale for better visualization
-var LOG_SCALE_UNITS = { "kg/m3": true, "MPa": true };
-
-function paintModel(modelId) {
-	var modelObj = pointData.models[modelId];
-	if (!modelObj) return;
-
-	var cap = GRADIENT_CAPS[modelObj.unit] || modelObj.max;
-	var capVal = Math.min(modelObj.max, cap);
-	var useLog = LOG_SCALE_UNITS[modelObj.unit] || false;
-	var logCap = useLog ? Math.log1p(capVal) : 0;
-	var colorAttr = meshGeo.getAttribute("color");
-	var arr = colorAttr.array;
-	var data = modelObj.data;
-	var count = Math.min(totalPoints, data.length);
-
-	for (var pi = 0; pi < count; pi++) {
-		var val = data[pi];
-		if (val <= 0) {
-			arr[pi * 3] = 0; arr[pi * 3 + 1] = 0; arr[pi * 3 + 2] = 0;
-		} else {
-			var t;
-			if (useLog) {
-				t = Math.min(1, Math.log1p(val) / logCap);
-			} else {
-				t = capVal > 0 ? Math.min(1, val / capVal) : 0;
-			}
-			var rgb = jetColormap(t);
-			arr[pi * 3]     = rgb[0] / 255;
-			arr[pi * 3 + 1] = rgb[1] / 255;
-			arr[pi * 3 + 2] = rgb[2] / 255;
-		}
-	}
-	colorAttr.needsUpdate = true;
-
-	var cappedNote = capVal < modelObj.max ? " (capped from " + modelObj.max.toFixed(0) + ")" : "";
-	var scaleNote = useLog ? " [log]" : "";
-	document.getElementById("stat-model").innerHTML =
-		"<b>" + modelObj.name + "</b><br>" +
-		"Scale: <b>0 — " + capVal.toFixed(0) + "</b> " + modelObj.unit + scaleNote + cappedNote + "<br>" +
-		"Peak: <b>" + modelObj.max.toFixed(1) + "</b> " + modelObj.unit + "<br>" +
-		"Grid: <b>" + box.nx + "x" + box.ny + "x" + box.nz + "</b> (" + box.spacing + "m)<br>" +
-		"Compute: <b>" + modelObj.computeSec + "</b> s";
-	document.getElementById("legend-max").textContent = capVal.toFixed(0) + " " + modelObj.unit;
-}
-
-// Step 6) Draw blast holes as cylinders
-var holesGroup = new THREE.Group();
-holesGroup.name = "holes";
-scene.add(holesGroup);
-
-for (var hi = 0; hi < holes.length; hi++) {
-	var h = holes[hi];
-	var dk = decks[hi];
-	var collarPos = new THREE.Vector3(h.collarX, h.collarY, h.collarZ);
-	var toePos = new THREE.Vector3(h.toeX, h.toeY, h.toeZ);
-	var holeDir = new THREE.Vector3().subVectors(toePos, collarPos).normalize();
-	var holeDiamM = h.holeDiamMm / 1000.0;
-	var displayRadius = Math.max(holeDiamM / 2 * 2, 0.15);
-	var up = new THREE.Vector3(0, 1, 0);
-	var quat = new THREE.Quaternion().setFromUnitVectors(up, holeDir);
-
-	if (dk) {
-		var chargeTopPos = new THREE.Vector3(dk.topX, dk.topY, dk.topZ);
-		var stemLen = collarPos.distanceTo(chargeTopPos);
-		if (stemLen > 0.05) {
-			var stemMid = new THREE.Vector3().addVectors(collarPos, chargeTopPos).multiplyScalar(0.5);
-			var stemGeo = new THREE.CylinderGeometry(displayRadius, displayRadius, stemLen, 8);
-			var stMesh = new THREE.Mesh(stemGeo, new THREE.MeshPhongMaterial({ color: 0xAA9977, transparent: true, opacity: 0.9 }));
-			stMesh.position.copy(stemMid); stMesh.quaternion.copy(quat);
-			holesGroup.add(stMesh);
-		}
-		var chargeBasePos = new THREE.Vector3(dk.baseX, dk.baseY, dk.baseZ);
-		var chargeLen = chargeTopPos.distanceTo(chargeBasePos);
-		if (chargeLen > 0.05) {
-			var chargeMid = new THREE.Vector3().addVectors(chargeTopPos, chargeBasePos).multiplyScalar(0.5);
-			var chargeGeo = new THREE.CylinderGeometry(displayRadius, displayRadius, chargeLen, 8);
-			var chMesh = new THREE.Mesh(chargeGeo, new THREE.MeshPhongMaterial({ color: 0xFFBBDD, transparent: true, opacity: 0.9 }));
-			chMesh.position.copy(chargeMid); chMesh.quaternion.copy(quat);
-			holesGroup.add(chMesh);
-		}
-		var subLen = chargeBasePos.distanceTo(toePos);
-		if (subLen > 0.05) {
-			var subMid = new THREE.Vector3().addVectors(chargeBasePos, toePos).multiplyScalar(0.5);
-			var subGeo = new THREE.CylinderGeometry(displayRadius * 0.6, displayRadius * 0.6, subLen, 8);
-			var sbMesh = new THREE.Mesh(subGeo, new THREE.MeshPhongMaterial({ color: 0x666666, transparent: true, opacity: 0.7 }));
-			sbMesh.position.copy(subMid); sbMesh.quaternion.copy(quat);
-			holesGroup.add(sbMesh);
-		}
-	}
-	var collarSphere = new THREE.Mesh(new THREE.SphereGeometry(displayRadius * 1.2, 8, 8), new THREE.MeshPhongMaterial({ color: 0xffffff }));
-	collarSphere.position.copy(collarPos);
-	holesGroup.add(collarSphere);
-	var toeSphere = new THREE.Mesh(new THREE.SphereGeometry(displayRadius * 0.7, 6, 6), new THREE.MeshPhongMaterial({ color: 0x6699ff }));
-	toeSphere.position.copy(toePos);
-	holesGroup.add(toeSphere);
-}
-
-// Step 7) Populate info panel
-var modelIds = Object.keys(pointData.models);
-
-document.getElementById("stat-blast").innerHTML =
-	"Entity: <b>" + holes[0].entityName + "</b><br>" +
-	"Holes: <b>" + holes.length + "</b><br>" +
-	"Decks: <b>" + decks.length + "</b><br>" +
-	"Grid: <b>" + box.nx + "x" + box.ny + "x" + box.nz + "</b> (" + box.spacing + "m)<br>" +
-	"Points: <b>" + totalPoints + "</b><br>" +
-	"Models: <b>" + modelIds.length + "</b> (volumetric)";
-
-var holeHtml = "";
-for (var hi = 0; hi < holes.length; hi++) {
-	var hh = holes[hi];
-	var dd = decks[hi];
-	holeHtml += "<b>H" + hh.holeID + "</b> " + hh.holeTime + "ms | " + (dd ? dd.mass.toFixed(0) : "?") + " kg<br>";
-}
-document.getElementById("stat-holes").innerHTML = holeHtml;
-
-// Step 8) Camera + resize
-function fitCamera() {
-	var sceneBounds = new THREE.Box3();
-	meshObj.geometry.computeBoundingBox();
-	sceneBounds.copy(meshObj.geometry.boundingBox);
-	holesGroup.traverse(function (child) {
-		if (child.isMesh) {
-			child.geometry.computeBoundingBox();
-			var cb = child.geometry.boundingBox.clone();
-			cb.applyMatrix4(child.matrixWorld);
-			sceneBounds.union(cb);
-		}
-	});
-	if (sceneBounds.isEmpty()) return;
-	var center = new THREE.Vector3();
-	sceneBounds.getCenter(center);
-	var size = new THREE.Vector3();
-	sceneBounds.getSize(size);
-	var maxDim = Math.max(size.x, size.y, size.z);
-	var dist = maxDim * 1.8;
-	controls.target.copy(center);
-	camera.position.set(center.x + dist * 0.6, center.y - dist * 0.4, center.z + dist * 0.3);
-	controls.update();
-}
-
-function onResize() {
-	var w = container.clientWidth;
-	var h = container.clientHeight;
-	camera.aspect = w / h;
-	camera.updateProjectionMatrix();
-	renderer.setSize(w, h);
-}
-window.addEventListener("resize", onResize);
-onResize();
-
-function animate() {
-	requestAnimationFrame(animate);
-	controls.update();
-	renderer.render(scene, camera);
-}
-animate();
-
-// Step 9) Paint first model, fit camera
-paintModel(modelIds[0]);
-fitCamera();
-
-// Step 10) lil-gui on the LEFT side of the viewport
-var modelNameMap = {};
-for (var mi = 0; mi < modelIds.length; mi++) {
-	modelNameMap[pointData.models[modelIds[mi]].name] = modelIds[mi];
-}
-
-var guiState = {
-	model: pointData.models[modelIds[0]].name,
-	pointSize: 0.5,
-	opacity: 0.8,
-	showCloud: true,
-	showHoles: true,
-	xyEnabled: false, xyPosition: 0.5, xyWidth: 0.2,
-	yzEnabled: false, yzPosition: 0.5, yzWidth: 0.2,
-	xzEnabled: false, xzPosition: 0.5, xzWidth: 0.2
-};
-
-var gui = new GUI({ title: "Controls", width: 280, container: container });
-gui.domElement.style.position = "absolute";
-gui.domElement.style.top = "0px";
-gui.domElement.style.left = "0px";
-gui.domElement.style.maxHeight = "100%";
-gui.domElement.style.overflowY = "auto";
-
-gui.add(guiState, "model", Object.keys(modelNameMap)).name("Model").onChange(function (v) {
-	paintModel(modelNameMap[v]);
-});
-
-var displayFolder = gui.addFolder("Display");
-displayFolder.add(guiState, "pointSize", 0.05, 2.0, 0.05).name("Point Size").onChange(function (v) {
-	meshMat.size = v;
-	// Step 10c) Update slice step sizes to match point size
-	var scale = v / box.spacing;
-	xyPosCtrl.step(stepZ * scale); xyWidCtrl.step(stepZ * scale);
-	yzPosCtrl.step(stepX * scale); yzWidCtrl.step(stepX * scale);
-	xzPosCtrl.step(stepY * scale); xzWidCtrl.step(stepY * scale);
-});
-displayFolder.add(guiState, "opacity", 0, 1, 0.01).name("Opacity").onChange(function (v) { meshMat.opacity = v; meshMat.transparent = v < 1.0; });
-displayFolder.add(guiState, "showCloud").name("Point Cloud").onChange(function (v) { meshObj.visible = v; });
-displayFolder.add(guiState, "showHoles").name("Holes").onChange(function (v) { holesGroup.visible = v; });
-
-// Step 10b) Slice position step = grid spacing / axis extent (snaps to grid points)
-var stepZ = box.spacing / boxExtZ;
-var stepX = box.spacing / boxExtX;
-var stepY = box.spacing / boxExtY;
-
-var xyFolder = gui.addFolder("XY Slice (Z)");
-xyFolder.add(guiState, "xyEnabled").name("Enabled").onChange(updateSlicePlanes);
-var xyPosCtrl = xyFolder.add(guiState, "xyPosition", 0, 1, stepZ).name("Z Position").onChange(updateSlicePlanes);
-var xyWidCtrl = xyFolder.add(guiState, "xyWidth", 0.01, 1, stepZ).name("Width").onChange(updateSlicePlanes);
-xyFolder.close();
-
-var yzFolder = gui.addFolder("YZ Slice (X)");
-yzFolder.add(guiState, "yzEnabled").name("Enabled").onChange(updateSlicePlanes);
-var yzPosCtrl = yzFolder.add(guiState, "yzPosition", 0, 1, stepX).name("X Position").onChange(updateSlicePlanes);
-var yzWidCtrl = yzFolder.add(guiState, "yzWidth", 0.01, 1, stepX).name("Width").onChange(updateSlicePlanes);
-yzFolder.close();
-
-var xzFolder = gui.addFolder("XZ Slice (Y)");
-xzFolder.add(guiState, "xzEnabled").name("Enabled").onChange(updateSlicePlanes);
-var xzPosCtrl = xzFolder.add(guiState, "xzPosition", 0, 1, stepY).name("Y Position").onChange(updateSlicePlanes);
-var xzWidCtrl = xzFolder.add(guiState, "xzWidth", 0.01, 1, stepY).name("Width").onChange(updateSlicePlanes);
-xzFolder.close();
-
-// Remove loading indicator
-var loadEl = document.getElementById("loading");
-if (loadEl) loadEl.remove();
-
-</script>
+</div>
 </body>
 </html>

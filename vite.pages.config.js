@@ -11,6 +11,7 @@ export default defineConfig({
         rollupOptions: {
             input: {
                 index: resolve(__dirname, "examples/index.html"),
+                analysis: resolve(__dirname, "examples/analysis.html"),
                 throw: resolve(__dirname, "examples/throw.html"),
                 ripple: resolve(__dirname, "examples/ripple.html")
             }

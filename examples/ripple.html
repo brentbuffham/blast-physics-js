@@ -6,7 +6,14 @@
 <style>
 	* { margin: 0; padding: 0; box-sizing: border-box; }
 	body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #d0d0d0; overflow: hidden; }
-	#app { display: flex; height: 100vh; }
+	#nav { height: 34px; background: #0d0d0d; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 4px; padding: 0 10px; font-size: 0.74rem; }
+	#nav .brand { font-family: 'Courier New', monospace; color: #888; margin-right: 14px; white-space: nowrap; }
+	#nav .brand b { color: #cc2222; font-weight: normal; }
+	#nav a { color: #aaa; text-decoration: none; padding: 4px 10px; border-radius: 4px; border: 1px solid transparent; white-space: nowrap; }
+	#nav a:hover { color: #fff; background: #1e1e1e; border-color: #3a3a3a; }
+	#nav a.on { color: #fff; background: #2a1414; border-color: #cc2222; }
+	#nav .spacer { flex: 1; }
+	#app { display: flex; height: calc(100vh - 34px); }
 	#viewport { flex: 1; position: relative; background: #0b0b0e; }
 	#plan { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
 	#info-panel { width: 330px; min-width: 300px; background: #111; border-left: 1px solid #333; padding: 10px 12px; font-size: 0.72rem; font-family: 'Courier New', monospace; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
@@ -24,6 +31,15 @@
 </style>
 </head>
 <body>
+<nav id="nav">
+	<span class="brand">blast<b>-</b>physics<b>-</b>js</span>
+	<a href="./index.html">Demos</a>
+	<a href="./analysis.html">Analysis</a>
+	<a href="./throw.html">Throw</a>
+	<a href="./ripple.html" class="on">Ripple Tank</a>
+	<span class="spacer"></span>
+	<a href="https://github.com/brentbuffham/blast-physics-js" target="_blank" rel="noopener">GitHub</a>
+</nav>
 <div id="app">
 	<div id="viewport">
 		<canvas id="plan"></canvas>
@@ -47,8 +63,6 @@
 		<h3>Monitor — forward array L / T / V</h3>
 		<canvas id="cTrace"></canvas>
 		<div class="stat" id="stat-mon">—</div>
-		<hr>
-		<div class="stat"><a href="./throw.html">blast throw demo</a> · <a href="./index.html">volumetric vibration demo</a></div>
 	</div>
 </div>
 

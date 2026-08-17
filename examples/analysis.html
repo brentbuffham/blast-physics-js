@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>blast-physics-js — Blast Analysis / Cross-Sections</title>
+<style>
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #d0d0d0; overflow: hidden; }
+	#nav { height: 34px; background: #0d0d0d; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 4px; padding: 0 10px; font-size: 0.74rem; }
+	#nav .brand { font-family: 'Courier New', monospace; color: #888; margin-right: 14px; white-space: nowrap; }
+	#nav .brand b { color: #cc2222; font-weight: normal; }
+	#nav a { color: #aaa; text-decoration: none; padding: 4px 10px; border-radius: 4px; border: 1px solid transparent; white-space: nowrap; }
+	#nav a:hover { color: #fff; background: #1e1e1e; border-color: #3a3a3a; }
+	#nav a.on { color: #fff; background: #2a1414; border-color: #cc2222; }
+	#nav .spacer { flex: 1; }
+	#app { display: flex; height: calc(100vh - 34px); }
+	#viewport { flex: 1; position: relative; }
+	#info-panel {
+		width: 250px; min-width: 200px; background: #111; border-left: 1px solid #333;
+		padding: 10px 12px; font-size: 0.72rem; font-family: 'Courier New', monospace;
+		overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+	}
+	#info-panel h3 { color: #cc2222; font-size: 0.8rem; margin-bottom: 4px; }
+	#info-panel .stat { color: #999; line-height: 1.6; word-break: break-word; }
+	#info-panel .stat b { color: #d0d0d0; }
+	#info-panel hr { border: none; border-top: 1px solid #333; margin: 4px 0; }
+	#info-panel a { color: #6aa0ff; }
+	#legend-bar { height: 14px; border-radius: 3px; margin-top: 4px; }
+	.legend-row { display: flex; justify-content: space-between; font-size: 0.65rem; color: #888; margin-top: 2px; }
+	#drop { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(204,34,34,0.25); font-size: 1.4rem; pointer-events: none; }
+	#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #cc2222; font-size: 1.2rem; z-index: 100; }
+	#hint { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); background: rgba(0,0,0,0.6); padding: 4px 12px; border-radius: 4px; font-size: 0.72rem; color: #aaa; pointer-events: none; }
+	#busy { position: absolute; right: 10px; top: 10px; background: rgba(0,0,0,0.6); padding: 3px 9px; border-radius: 4px; font-size: 0.7rem; color: #cc2222; display: none; }
+	.sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<nav id="nav">
+	<span class="brand">blast<b>-</b>physics<b>-</b>js</span>
+	<a href="./index.html">Demos</a>
+	<a href="./analysis.html" class="on">Analysis</a>
+	<a href="./throw.html">Throw</a>
+	<a href="./ripple.html">Ripple Tank</a>
+	<span class="spacer"></span>
+	<a href="https://github.com/brentbuffham/blast-physics-js" target="_blank" rel="noopener">GitHub</a>
+</nav>
+<div id="app">
+	<div id="viewport">
+		<div id="loading">Loading SWELLFACTOR.kap…</div>
+		<div id="drop">Drop a .kap file</div>
+		<div id="busy">computing…</div>
+		<div id="hint">Drag a cross-section plane to slice through the blast</div>
+	</div>
+	<div id="info-panel">
+		<h3>Blast Data</h3>
+		<div class="stat" id="stat-file">—</div>
+		<hr>
+		<h3>Model Output</h3>
+		<div class="stat" id="stat-model">—</div>
+		<div id="legend-bar"></div>
+		<div class="legend-row"><span>0</span><span id="legend-max">—</span></div>
+		<hr>
+		<h3>Cross-Sections</h3>
+		<div class="stat" id="stat-planes">—</div>
+		<hr>
+		<div class="stat">Models evaluated live from the KAP — nothing is pre-baked. Drop any Kirra <b>.kap</b> on the viewport.</div>
+	</div>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import GUI from "lil-gui";
+import { parseKAP } from "../src/index.js";
+
+// Step 1) Three.js scene — Z-up, rendered in local coordinates about the
+// blast centroid. KAP coordinates are real-world grid (478000, 6772000 …),
+// which loses too much precision once baked into Float32 buffers.
+var container = document.getElementById("viewport");
+var scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0b0e);
+var camera = new THREE.PerspectiveCamera(50, 1, 0.5, 8000);
+camera.up.set(0, 0, 1);
+var renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+container.appendChild(renderer.domElement);
+var controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+var dl = new THREE.DirectionalLight(0xffffff, 0.5); dl.position.set(50, -80, 120); scene.add(dl);
+
+var holesGrp = new THREE.Group(), planeGrp = new THREE.Group(), cloudGrp = new THREE.Group();
+scene.add(holesGrp, planeGrp, cloudGrp);
+
+// Step 2) Jet colormap — same ramp as the rest of the demo set
+function jetColormap(t) {
+	if (t <= 0) return [0, 0, 128];
+	if (t >= 1) return [128, 0, 0];
+	var r, g, b, u;
+	if (t < 0.125) { r = 0; g = 0; b = 128 + t / 0.125 * 127; }
+	else if (t < 0.375) { u = (t - 0.125) / 0.25; r = 0; g = Math.round(u * 255); b = 255; }
+	else if (t < 0.625) { u = (t - 0.375) / 0.25; r = Math.round(u * 255); g = 255; b = Math.round((1 - u) * 255); }
+	else if (t < 0.875) { u = (t - 0.625) / 0.25; r = 255; g = Math.round((1 - u) * 255); b = 0; }
+	else { u = (t - 0.875) / 0.125; r = Math.round(255 - u * 127); g = 0; b = 0; }
+	return [r, g, b];
+}
+
+(function buildLegendGradient() {
+	var c = document.createElement("canvas");
+	c.width = 200; c.height = 14;
+	var ctx = c.getContext("2d");
+	for (var i = 0; i < 200; i++) {
+		var rgb = jetColormap(i / 200);
+		ctx.fillStyle = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
+		ctx.fillRect(i, 0, 2, 14);
+	}
+	var el = document.getElementById("legend-bar");
+	el.style.backgroundImage = "url(" + c.toDataURL() + ")";
+	el.style.backgroundSize = "100% 100%";
+})();
+
+// Step 3) Plane definitions. `axis` is the constant (normal) axis; `col` and
+// `row` are the in-plane axes, ordered to match PlaneGeometry's UV layout so
+// data row 0 sits at the -row end. Geometry rotations are applied to the
+// BufferGeometry directly — Euler order on the mesh is ambiguous here.
+var PLANES = [
+	{ key: "z", label: "XY — Z level",   axis: "z", col: "x", row: "y", colour: 0x4aa3ff,
+	  rotate: function (g) { } },
+	{ key: "y", label: "XZ — Y section", axis: "y", col: "x", row: "z", colour: 0x55dd77,
+	  rotate: function (g) { g.rotateX(Math.PI / 2); } },
+	{ key: "x", label: "YZ — X section", axis: "x", col: "y", row: "z", colour: 0xff5555,
+	  rotate: function (g) { g.rotateX(Math.PI / 2); g.rotateZ(Math.PI / 2); } }
+];
+
+var P = {
+	model: "powderFactor",
+	samples: 96,
+	autoQuality: true,
+	opacity: 0.92,
+	logScale: false,
+	scaleMax: 0,
+	lockScale: false,
+	snapToGrid: false,
+	showHoles: true,
+	showCloud: false,
+	cloudSpacing: 2.0,
+	cloudSize: 0.9,
+	showFrames: true,
+	"z.on": true, "z.pos": 0,
+	"y.on": true, "y.pos": 0,
+	"x.on": true, "x.pos": 0
+};
+
+// Models whose field goes as 1/d² about the charge read far better on a log
+// ramp — without it the bench sits in the bottom colour bin and only the
+// centimetres either side of a deck carry any colour at all.
+var LOG_DEFAULT = { powderFactor: true, boreholePressure: true, see: true };
+
+var kap = null, box = null, origin = null, worker = null;
+var registry = [], registryById = {};
+var state = {};   // per-plane runtime: mesh, texture, dims, pending, queued, max, ms
+var jobSeq = 0;
+var latestJob = {};
+var scaleMax = 0;
+var peakSeen = 0;
+var cloudJob = -1;
+var busyCount = 0;
+
+function setBusy(delta) {
+	busyCount = Math.max(0, busyCount + delta);
+	document.getElementById("busy").style.display = busyCount > 0 ? "block" : "none";
+}
+
+// Step 4) Worker boot — the registry arrives unprompted on worker startup
+worker = new Worker(new URL("./analysis-worker.js", import.meta.url), { type: "module" });
+worker.onmessage = function (ev) {
+	var m = ev.data;
+	if (m.type === "registry") { registry = m.models; registry.forEach(function (r) { registryById[r.id] = r; }); return; }
+	if (m.type === "ready") return;
+	if (m.type === "result") onResult(m);
+};
+
+// Step 5) KAP loading
+async function loadKAP(source, name) {
+	document.getElementById("loading").style.display = "block";
+	document.getElementById("loading").textContent = "Parsing " + name + "…";
+	try {
+		kap = await parseKAP(source);
+	} catch (e) {
+		document.getElementById("loading").textContent = "Parse failed: " + e.message;
+		return;
+	}
+	if (!kap.decks.length) {
+		document.getElementById("loading").textContent = name + " has no charged decks.";
+		return;
+	}
+
+	computeBox();
+	worker.postMessage({ type: "data", decks: kap.decks, holes: kap.holes });
+
+	buildHoles();
+	buildPlanes();
+	resetPlanePositions();
+	fitCamera();
+
+	var tMin = Infinity, tMax = -Infinity, mass = 0;
+	for (var i = 0; i < kap.decks.length; i++) {
+		var d = kap.decks[i];
+		if (d.timingMs < tMin) tMin = d.timingMs;
+		if (d.timingMs > tMax) tMax = d.timingMs;
+		mass += d.mass || 0;
+	}
+	document.getElementById("stat-file").innerHTML =
+		"File: <b>" + name + "</b><br>" +
+		"Holes: <b>" + kap.holes.length + "</b> · Decks: <b>" + kap.decks.length + "</b><br>" +
+		"Total mass: <b>" + mass.toFixed(0) + "</b> kg<br>" +
+		"Timing: <b>" + tMin.toFixed(0) + "–" + tMax.toFixed(0) + "</b> ms<br>" +
+		"Box: <b>" + (box.maxX - box.minX).toFixed(0) + " × " + (box.maxY - box.minY).toFixed(0) + " × " + (box.maxZ - box.minZ).toFixed(0) + "</b> m";
+
+	document.getElementById("loading").style.display = "none";
+	applyModelDefaults();
+	requestAllPlanes();
+	if (P.showCloud) requestCloud();
+}
+
+// Step 6) Evaluation box — hole extents plus a 10 m pad, matching precompute.mjs
+var PAD = 10;
+function computeBox() {
+	var b = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, minZ: Infinity, maxZ: -Infinity };
+	for (var i = 0; i < kap.holes.length; i++) {
+		var h = kap.holes[i];
+		b.minX = Math.min(b.minX, h.collarX, h.toeX); b.maxX = Math.max(b.maxX, h.collarX, h.toeX);
+		b.minY = Math.min(b.minY, h.collarY, h.toeY); b.maxY = Math.max(b.maxY, h.collarY, h.toeY);
+		b.minZ = Math.min(b.minZ, h.collarZ, h.toeZ); b.maxZ = Math.max(b.maxZ, h.collarZ, h.toeZ);
+	}
+	b.minX -= PAD; b.maxX += PAD; b.minY -= PAD; b.maxY += PAD; b.minZ -= PAD; b.maxZ += PAD;
+	box = b;
+	// Z stays in world elevation — a blast engineer reads RL directly, and
+	// values near 330 are well inside Float32 precision.
+	origin = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2, z: 0 };
+}
+
+function ext(axis) {
+	if (axis === "x") return box.maxX - box.minX;
+	if (axis === "y") return box.maxY - box.minY;
+	return box.maxZ - box.minZ;
+}
+function lo(axis) { return axis === "x" ? box.minX : axis === "y" ? box.minY : box.minZ; }
+function hi(axis) { return axis === "x" ? box.maxX : axis === "y" ? box.maxY : box.maxZ; }
+function toLocal(axis, v) { return axis === "x" ? v - origin.x : axis === "y" ? v - origin.y : v - origin.z; }
+
+// Step 7) Blast holes — drawn as line segments. At 531 holes a cylinder per
+// deck section would be ~1600 draw calls; two LineSegments is two.
+function buildHoles() {
+	holesGrp.clear();
+	var trace = [], charge = [];
+	for (var i = 0; i < kap.holes.length; i++) {
+		var h = kap.holes[i];
+		trace.push(toLocal("x", h.collarX), toLocal("y", h.collarY), h.collarZ,
+		           toLocal("x", h.toeX), toLocal("y", h.toeY), h.toeZ);
+	}
+	for (var d = 0; d < kap.decks.length; d++) {
+		var dk = kap.decks[d];
+		charge.push(toLocal("x", dk.topX), toLocal("y", dk.topY), dk.topZ,
+		            toLocal("x", dk.baseX), toLocal("y", dk.baseY), dk.baseZ);
+	}
+	holesGrp.add(lineSet(trace, 0x777777, 1));
+	holesGrp.add(lineSet(charge, 0xffbbdd, 1));
+}
+
+function lineSet(arr, colour, width) {
+	var g = new THREE.BufferGeometry();
+	g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(arr), 3));
+	return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: colour, linewidth: width }));
+}
+
+// Step 8) Build the three slice meshes plus their edge frames
+function buildPlanes() {
+	planeGrp.clear();
+	state = {};
+	for (var i = 0; i < PLANES.length; i++) {
+		var def = PLANES[i];
+		var w = ext(def.col), h = ext(def.row);
+		var geo = new THREE.PlaneGeometry(w, h, 1, 1);
+		def.rotate(geo);
+
+		var tex = new THREE.DataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat);
+		tex.colorSpace = THREE.SRGBColorSpace;
+		tex.minFilter = THREE.LinearFilter;
+		tex.magFilter = THREE.LinearFilter;
+		tex.needsUpdate = true;
+
+		var mat = new THREE.MeshBasicMaterial({
+			map: tex, transparent: true, opacity: P.opacity,
+			side: THREE.DoubleSide, depthWrite: false
+		});
+		var mesh = new THREE.Mesh(geo, mat);
+		mesh.renderOrder = 2;
+		mesh.userData.key = def.key;
+
+		var frame = new THREE.LineSegments(
+			new THREE.EdgesGeometry(geo),
+			new THREE.LineBasicMaterial({ color: def.colour })
+		);
+		mesh.add(frame);
+		mesh.userData.frame = frame;
+
+		planeGrp.add(mesh);
+		state[def.key] = { def: def, mesh: mesh, tex: tex, mat: mat, pending: false, queued: false, max: 0, ms: 0, w: 0, h: 0 };
+	}
+}
+
+function resetPlanePositions() {
+	for (var i = 0; i < PLANES.length; i++) {
+		var def = PLANES[i];
+		P[def.key + ".pos"] = (lo(def.axis) + hi(def.axis)) / 2;
+	}
+	syncPlaneTransforms();
+}
+
+// Step 9) Place each mesh at its current axis position (local coords)
+function syncPlaneTransforms() {
+	for (var i = 0; i < PLANES.length; i++) {
+		var def = PLANES[i];
+		var st = state[def.key];
+		if (!st) continue;
+		var pos = P[def.key + ".pos"];
+		var cx = toLocal("x", (box.minX + box.maxX) / 2);
+		var cy = toLocal("y", (box.minY + box.maxY) / 2);
+		var cz = toLocal("z", (box.minZ + box.maxZ) / 2);
+		if (def.axis === "z") st.mesh.position.set(cx, cy, pos);
+		else if (def.axis === "y") st.mesh.position.set(cx, toLocal("y", pos), cz);
+		else st.mesh.position.set(toLocal("x", pos), cy, cz);
+		st.mesh.visible = !!P[def.key + ".on"];
+		if (st.mesh.userData.frame) st.mesh.userData.frame.visible = P.showFrames;
+	}
+	updatePlaneStats();
+}
+
+// Step 10) Job dispatch. One in-flight job per plane; newer requests coalesce
+// into `queued` so dragging never builds a backlog on the worker.
+// Per-point cost spans three orders of magnitude across the registry — powder
+// factor runs ~2 µs while Scaled Heelan Blair measures ~330 µs at 531 decks,
+// which is 2.8 s for a full-resolution XY plane. Auto quality trades samples
+// for responsiveness on the expensive models, and every plane drops further
+// while it is actually being dragged.
+function effectiveSamples(dragging) {
+	var s = P.samples;
+	if (P.autoQuality) {
+		var reg = registryById[P.model];
+		var cost = reg ? reg.cost : 1;
+		if (cost >= 20) s = Math.min(s, 48);
+		else if (cost >= 3) s = Math.min(s, 96);
+	}
+	if (dragging) s = Math.max(16, Math.round(s * 0.5));
+	return s;
+}
+
+function latticeFor(axis, samples) {
+	var maxExt = Math.max(ext("x"), ext("y"), ext("z"));
+	var step = maxExt / Math.max(1, (samples || P.samples) - 1);
+	var n = Math.max(2, Math.round(ext(axis) / step) + 1);
+	return { start: lo(axis), step: ext(axis) / (n - 1), n: n };
+}
+
+function requestPlane(key) {
+	var st = state[key];
+	if (!st || !kap) return;
+	if (!P[key + ".on"]) return;
+	if (st.pending) { st.queued = true; return; }
+	st.pending = true;
+	setBusy(1);
+	var id = ++jobSeq;
+	latestJob[key] = id;
+	var s = effectiveSamples(!!drag);
+	worker.postMessage({
+		type: "plane", id: id, key: key, model: P.model,
+		axis: st.def.axis, pos: P[key + ".pos"],
+		col: latticeFor(st.def.col, s), row: latticeFor(st.def.row, s)
+	});
+}
+
+function requestAllPlanes() {
+	for (var i = 0; i < PLANES.length; i++) requestPlane(PLANES[i].key);
+}
+
+function requestCloud() {
+	if (!kap) return;
+	setBusy(1);
+	cloudJob = ++jobSeq;
+	var s = P.cloudSpacing;
+	worker.postMessage({
+		type: "volume", id: cloudJob, model: P.model,
+		x: { start: box.minX, step: s, n: Math.max(2, Math.floor(ext("x") / s) + 1) },
+		y: { start: box.minY, step: s, n: Math.max(2, Math.floor(ext("y") / s) + 1) },
+		z: { start: box.minZ, step: s, n: Math.max(2, Math.floor(ext("z") / s) + 1) }
+	});
+}
+
+// Step 11) Results
+function onResult(m) {
+	setBusy(-1);
+	if (m.kind === "volume") {
+		if (m.id !== cloudJob) return;
+		raisePeak(m.max);
+		raiseScale(m.p98);
+		paintCloud(m);
+		return;
+	}
+	var st = state[m.key];
+	if (!st) return;
+	st.pending = false;
+	if (m.id === latestJob[m.key]) {
+		st.max = m.max; st.ms = m.ms; st.w = m.w; st.h = m.h;
+		raisePeak(m.max);
+		st.values = m.values;
+		raiseScale(m.p98);
+		repaintPlane(m.key);
+		repaintOtherPlanes(m.key);
+		updateModelStats();
+		updatePlaneStats();
+	}
+	if (st.queued) { st.queued = false; requestPlane(m.key); }
+}
+
+// Step 12) Colour scale. Driven by the 98th percentile rather than the peak —
+// these fields are singular at the charge, so the peak is a point artefact and
+// scaling to it flattens the whole bench into one colour. It only ever rises
+// within a model so colours settle instead of flickering while dragging.
+// Reset the scale and pick the ramp that suits the model. Called on load as
+// well as on change — a change-only handler leaves the first model unscaled.
+function applyModelDefaults() {
+	scaleMax = 0; peakSeen = 0;
+	P.lockScale = false;
+	P.logScale = !!LOG_DEFAULT[P.model];
+	if (logCtrl) logCtrl.updateDisplay();
+	if (lockCtrl) lockCtrl.updateDisplay();
+}
+
+function raisePeak(v) {
+	if (isFinite(v) && v > peakSeen) peakSeen = v;
+}
+
+function raiseScale(v) {
+	if (P.lockScale) return;
+	if (v > scaleMax) {
+		scaleMax = v;
+		P.scaleMax = Math.round(v * 100) / 100;
+		if (scaleCtrl) scaleCtrl.updateDisplay();
+		repaintAllPlanes();
+	}
+}
+
+function activeScale() {
+	return P.lockScale ? Math.max(1e-9, P.scaleMax) : Math.max(1e-9, scaleMax);
+}
+
+function repaintPlane(key) {
+	var st = state[key];
+	if (!st || !st.values) return;
+	var cap = activeScale();
+	var logCap = P.logScale ? Math.log1p(cap) : 0;
+	var n = st.w * st.h;
+	var rgba = new Uint8Array(n * 4);
+	for (var i = 0; i < n; i++) {
+		var v = st.values[i];
+		if (!isFinite(v) || v <= 0) { rgba[i * 4 + 3] = 0; continue; }
+		var t = P.logScale ? Math.min(1, Math.log1p(v) / logCap) : Math.min(1, v / cap);
+		var c = jetColormap(t);
+		rgba[i * 4] = c[0]; rgba[i * 4 + 1] = c[1]; rgba[i * 4 + 2] = c[2]; rgba[i * 4 + 3] = 255;
+	}
+	st.tex.dispose();
+	var tex = new THREE.DataTexture(rgba, st.w, st.h, THREE.RGBAFormat);
+	tex.colorSpace = THREE.SRGBColorSpace;
+	tex.minFilter = THREE.LinearFilter;
+	tex.magFilter = THREE.LinearFilter;
+	tex.needsUpdate = true;
+	st.tex = tex;
+	st.mat.map = tex;
+	st.mat.needsUpdate = true;
+}
+
+function repaintOtherPlanes(skipKey) {
+	for (var i = 0; i < PLANES.length; i++) {
+		var k = PLANES[i].key;
+		if (k !== skipKey && state[k] && state[k].values) repaintPlane(k);
+	}
+}
+function repaintAllPlanes() {
+	for (var i = 0; i < PLANES.length; i++) if (state[PLANES[i].key] && state[PLANES[i].key].values) repaintPlane(PLANES[i].key);
+}
+
+// Step 13) Optional volumetric point cloud — the original display, kept as a
+// toggle so the two can be compared directly.
+function paintCloud(m) {
+	cloudGrp.clear();
+	var s = P.cloudSpacing;
+	var total = m.w * m.h * m.d;
+	var pos = new Float32Array(total * 3);
+	var col = new Float32Array(total * 3);
+	var cap = activeScale();
+	var logCap = P.logScale ? Math.log1p(cap) : 0;
+	var kept = 0;
+	var i = 0;
+	for (var iz = 0; iz < m.d; iz++) {
+		for (var iy = 0; iy < m.h; iy++) {
+			for (var ix = 0; ix < m.w; ix++, i++) {
+				var v = m.values[i];
+				if (!isFinite(v) || v <= 0) continue;
+				var t = P.logScale ? Math.min(1, Math.log1p(v) / logCap) : Math.min(1, v / cap);
+				var c = jetColormap(t);
+				pos[kept * 3] = toLocal("x", box.minX + ix * s);
+				pos[kept * 3 + 1] = toLocal("y", box.minY + iy * s);
+				pos[kept * 3 + 2] = box.minZ + iz * s;
+				col[kept * 3] = c[0] / 255; col[kept * 3 + 1] = c[1] / 255; col[kept * 3 + 2] = c[2] / 255;
+				kept++;
+			}
+		}
+	}
+	var g = new THREE.BufferGeometry();
+	g.setAttribute("position", new THREE.BufferAttribute(pos.subarray(0, kept * 3), 3));
+	g.setAttribute("color", new THREE.BufferAttribute(col.subarray(0, kept * 3), 3));
+	var pts = new THREE.Points(g, new THREE.PointsMaterial({
+		vertexColors: true, size: P.cloudSize, sizeAttenuation: true,
+		transparent: true, opacity: 0.55, depthWrite: false
+	}));
+	cloudGrp.add(pts);
+	cloudGrp.visible = P.showCloud;
+}
+
+// Step 14) Plane dragging. A pointer ray and an axis line are skew in general,
+// so the plane follows the point on its own axis closest to the ray.
+var raycaster = new THREE.Raycaster();
+var pointer = new THREE.Vector2();
+var drag = null;
+var AXIS_VEC = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+
+function setPointer(e) {
+	var r = renderer.domElement.getBoundingClientRect();
+	pointer.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+	pointer.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+}
+
+function axisParam(ray, planePoint, axisDir) {
+	var w0 = new THREE.Vector3().subVectors(planePoint, ray.origin);
+	var b = axisDir.dot(ray.direction);
+	var d = axisDir.dot(w0);
+	var e = ray.direction.dot(w0);
+	var denom = 1 - b * b;
+	if (Math.abs(denom) < 1e-6) return null;   // looking straight down the axis
+	return (b * e - d) / denom;
+}
+
+function pickPlane() {
+	raycaster.setFromCamera(pointer, camera);
+	var meshes = [];
+	for (var i = 0; i < PLANES.length; i++) {
+		var st = state[PLANES[i].key];
+		if (st && st.mesh.visible) meshes.push(st.mesh);
+	}
+	var hits = raycaster.intersectObjects(meshes, false);
+	return hits.length ? hits[0] : null;
+}
+
+renderer.domElement.addEventListener("pointerdown", function (e) {
+	if (!kap || e.button !== 0) return;
+	setPointer(e);
+	var hit = pickPlane();
+	if (!hit) return;
+	var key = hit.object.userData.key;
+	var st = state[key];
+	var s0 = axisParam(raycaster.ray, hit.object.position, AXIS_VEC[st.def.axis]);
+	if (s0 === null) return;
+	drag = { key: key, s0: s0, pos0: P[key + ".pos"] };
+	controls.enabled = false;
+	renderer.domElement.setPointerCapture(e.pointerId);
+});
+
+renderer.domElement.addEventListener("pointermove", function (e) {
+	if (!kap) return;
+	setPointer(e);
+	if (!drag) {
+		renderer.domElement.style.cursor = pickPlane() ? "grab" : "auto";
+		return;
+	}
+	renderer.domElement.style.cursor = "grabbing";
+	var st = state[drag.key];
+	raycaster.setFromCamera(pointer, camera);
+	var s = axisParam(raycaster.ray, st.mesh.position, AXIS_VEC[st.def.axis]);
+	if (s === null) return;
+	var next = drag.pos0 + (s - drag.s0);
+	if (P.snapToGrid) {
+		var step = latticeFor(st.def.axis, effectiveSamples(false)).step;
+		next = lo(st.def.axis) + Math.round((next - lo(st.def.axis)) / step) * step;
+	}
+	P[drag.key + ".pos"] = Math.max(lo(st.def.axis), Math.min(hi(st.def.axis), next));
+	syncPlaneTransforms();
+	if (posCtrl[drag.key]) posCtrl[drag.key].updateDisplay();
+	requestPlane(drag.key);
+});
+
+function endDrag(e) {
+	if (!drag) return;
+	var key = drag.key;
+	drag = null;
+	controls.enabled = true;
+	renderer.domElement.style.cursor = "grab";
+	if (e && e.pointerId != null && renderer.domElement.hasPointerCapture(e.pointerId)) {
+		renderer.domElement.releasePointerCapture(e.pointerId);
+	}
+	requestPlane(key);
+}
+renderer.domElement.addEventListener("pointerup", endDrag);
+renderer.domElement.addEventListener("pointercancel", endDrag);
+
+// Step 15) Panels
+function updateModelStats() {
+	var reg = registryById[P.model];
+	if (!reg) return;
+	var slowest = 0;
+	for (var i = 0; i < PLANES.length; i++) {
+		var st = state[PLANES[i].key];
+		if (st && st.ms > slowest) slowest = st.ms;
+	}
+	var eff = effectiveSamples(false);
+	var lat = latticeFor("x", eff);
+	document.getElementById("stat-model").innerHTML =
+		"<b>" + reg.name + "</b><br>" +
+		"Scale: <b>0 — " + activeScale().toFixed(2) + "</b> " + reg.unit + (P.logScale ? " [log]" : "") + "<br>" +
+		"<span style='color:#666'>(98th percentile — colours clip above)</span><br>" +
+		"Peak: <b>" + peakSeen.toFixed(2) + "</b> " + reg.unit + "<br>" +
+		"Sample step: <b>" + lat.step.toFixed(2) + "</b> m" +
+		(eff < P.samples ? " <span style='color:#666'>(auto " + eff + ")</span>" : "") + "<br>" +
+		"Slowest plane: <b>" + slowest.toFixed(0) + "</b> ms";
+	document.getElementById("legend-max").textContent = activeScale().toFixed(2) + " " + reg.unit;
+}
+
+function updatePlaneStats() {
+	var html = "";
+	for (var i = 0; i < PLANES.length; i++) {
+		var def = PLANES[i], st = state[def.key];
+		var sw = "<span class='sw' style='background:#" + def.colour.toString(16).padStart(6, "0") + "'></span>";
+		var pos = P[def.key + ".pos"];
+		var label = def.axis === "z" ? "RL " + pos.toFixed(1) : def.axis.toUpperCase() + " " + pos.toFixed(1);
+		html += sw + def.label + "<br>&nbsp;&nbsp;" + (P[def.key + ".on"] ? "<b>" + label + "</b>" : "off") +
+		        (st && st.w ? " · " + st.w + "×" + st.h + " · " + st.ms.toFixed(0) + "ms" : "") + "<br>";
+	}
+	document.getElementById("stat-planes").innerHTML = html;
+}
+
+// Step 16) Camera
+function fitCamera() {
+	var cx = 0, cy = 0, cz = (box.minZ + box.maxZ) / 2;
+	var maxDim = Math.max(ext("x"), ext("y"), ext("z"));
+	var dist = maxDim * 1.4;
+	controls.target.set(cx, cy, cz);
+	camera.position.set(cx + dist * 0.6, cy - dist * 0.6, cz + dist * 0.45);
+	controls.update();
+}
+
+function onResize() {
+	var w = container.clientWidth, h = container.clientHeight;
+	camera.aspect = w / h;
+	camera.updateProjectionMatrix();
+	renderer.setSize(w, h);
+}
+window.addEventListener("resize", onResize);
+onResize();
+
+(function animate() {
+	requestAnimationFrame(animate);
+	controls.update();
+	renderer.render(scene, camera);
+})();
+
+// Step 17) GUI
+var gui = new GUI({ title: "Analysis", width: 290, container: container });
+gui.domElement.style.position = "absolute";
+gui.domElement.style.top = "0px";
+gui.domElement.style.left = "0px";
+gui.domElement.style.maxHeight = "100%";
+gui.domElement.style.overflowY = "auto";
+
+var MODEL_LABELS = {
+	"PPV (Site Law)": "ppv", "PPV Per-Deck": "ppvDeck", "Powder Factor": "powderFactor",
+	"Borehole Pressure": "boreholePressure", "Specific Energy": "see",
+	"Scaled Depth of Burial": "sdob", "Holmberg-Persson": "holmbergPersson",
+	"Jointed Rock": "jointedRock", "Heelan Original": "heelanOriginal",
+	"Scaled Heelan": "scaledHeelan", "Scaled Heelan Blair": "scaledHeelanBlair"
+};
+var guiModel = { label: "Powder Factor" };
+gui.add(guiModel, "label", Object.keys(MODEL_LABELS)).name("Model").onChange(function (v) {
+	P.model = MODEL_LABELS[v];
+	applyModelDefaults();
+	requestAllPlanes();
+	if (P.showCloud) requestCloud();
+});
+
+var posCtrl = {}, scaleCtrl = null, logCtrl = null, lockCtrl = null;
+
+var fSlice = gui.addFolder("Cross-Sections");
+for (var pi = 0; pi < PLANES.length; pi++) {
+	(function (def) {
+		var f = fSlice.addFolder(def.label);
+		f.add(P, def.key + ".on").name("Visible").onChange(function () {
+			syncPlaneTransforms();
+			requestPlane(def.key);
+		});
+		posCtrl[def.key] = f.add(P, def.key + ".pos", 0, 1, 0.01).name("Position (m)").onChange(function () {
+			syncPlaneTransforms();
+			requestPlane(def.key);
+		});
+	})(PLANES[pi]);
+}
+fSlice.add(P, "snapToGrid").name("Snap to sample grid");
+fSlice.add(P, "showFrames").name("Edge frames").onChange(syncPlaneTransforms);
+
+var fRes = gui.addFolder("Resolution");
+fRes.add(P, "samples", 24, 240, 4).name("Samples (long axis)").onFinishChange(function () { requestAllPlanes(); updateModelStats(); });
+fRes.add(P, "autoQuality").name("Auto quality (by cost)").onChange(function () { requestAllPlanes(); updateModelStats(); });
+fRes.add(P, "opacity", 0.1, 1, 0.02).name("Plane opacity").onChange(function (v) {
+	for (var i = 0; i < PLANES.length; i++) if (state[PLANES[i].key]) state[PLANES[i].key].mat.opacity = v;
+});
+
+var fScale = gui.addFolder("Colour Scale");
+logCtrl = fScale.add(P, "logScale").name("Log scale").onChange(function () { repaintAllPlanes(); updateModelStats(); });
+scaleCtrl = fScale.add(P, "scaleMax").name("Max").onChange(function () { repaintAllPlanes(); updateModelStats(); });
+lockCtrl = fScale.add(P, "lockScale").name("Lock max").onChange(function () { repaintAllPlanes(); updateModelStats(); });
+fScale.add({ rescale: function () { scaleMax = 0; peakSeen = 0; P.lockScale = false; lockCtrl.updateDisplay(); requestAllPlanes(); } }, "rescale").name("↻ Rescale from data");
+
+var fDisp = gui.addFolder("Display");
+fDisp.add(P, "showHoles").name("Blastholes").onChange(function (v) { holesGrp.visible = v; });
+fDisp.add(P, "showCloud").name("Volumetric cloud").onChange(function (v) {
+	cloudGrp.visible = v;
+	if (v && !cloudGrp.children.length) requestCloud();
+});
+fDisp.add(P, "cloudSpacing", 0.5, 5, 0.25).name("Cloud spacing (m)").onFinishChange(function () {
+	if (P.showCloud) requestCloud();
+});
+fDisp.add(P, "cloudSize", 0.2, 3, 0.1).name("Cloud point size").onChange(function (v) {
+	cloudGrp.traverse(function (o) { if (o.isPoints) o.material.size = v; });
+});
+fDisp.add({ home: fitCamera }, "home").name("⌂ Reset view");
+fDisp.close();
+
+// Position sliders need real box ranges once a KAP is in
+function rebindPositionSliders() {
+	for (var i = 0; i < PLANES.length; i++) {
+		var def = PLANES[i];
+		posCtrl[def.key].min(lo(def.axis)).max(hi(def.axis)).step(0.1).updateDisplay();
+	}
+}
+
+window.blastAnalysis = { P: P, state: state, requestAllPlanes: requestAllPlanes, get kap() { return kap; } };
+
+// Step 18) Drag & drop + auto-load
+var drop = document.getElementById("drop");
+container.addEventListener("dragover", function (e) { e.preventDefault(); drop.style.display = "flex"; });
+container.addEventListener("dragleave", function () { drop.style.display = "none"; });
+container.addEventListener("drop", function (e) {
+	e.preventDefault(); drop.style.display = "none";
+	if (e.dataTransfer.files.length) loadAndBind(e.dataTransfer.files[0], e.dataTransfer.files[0].name);
+});
+
+async function loadAndBind(source, name) {
+	await loadKAP(source, name);
+	if (kap) { rebindPositionSliders(); updateModelStats(); }
+}
+
+try {
+	var resp = await fetch("./SWELLFACTOR.kap");
+	if (!resp.ok) throw new Error("SWELLFACTOR.kap: " + resp.status);
+	await loadAndBind(await resp.arrayBuffer(), "SWELLFACTOR.kap");
+} catch (e) {
+	document.getElementById("loading").textContent = "Drop a .kap file to begin (" + e.message + ")";
+}
+</script>
+</body>
+</html>
