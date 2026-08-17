@@ -22,6 +22,13 @@
 	#info-panel .stat b { color: #d0d0d0; }
 	#info-panel hr { border: none; border-top: 1px solid #333; margin: 2px 0; }
 	#info-panel a { color: #6aa0ff; }
+	.warn { border: 1px solid #7a4a12; background: #241a0c; color: #d8a35a; border-radius: 4px; padding: 6px 8px; line-height: 1.5; }
+	.warn b { color: #ffc879; }
+	#banner {
+		position: absolute; left: 50%; top: 8px; transform: translateX(-50%); z-index: 30;
+		background: rgba(36,26,12,0.92); border: 1px solid #7a4a12; color: #d8a35a;
+		font-size: 0.7rem; padding: 3px 12px; border-radius: 4px; pointer-events: none; white-space: nowrap;
+	}
 	#info-panel canvas { width: 100%; height: 110px; background: #0b0b0e; border: 1px solid #2a2a2a; border-radius: 3px; display: block; }
 	#footer { position: absolute; left: 0; right: 0; bottom: 0; height: 26px; background: rgba(0,0,0,0.6); display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 0.72rem; }
 	#tprog { flex: 1; height: 8px; background: #333; border-radius: 4px; cursor: pointer; }
@@ -42,12 +49,23 @@
 </nav>
 <div id="app">
 	<div id="viewport">
+		<div id="banner">Demonstration only — idealised wave analogue, not a rock-mass prediction</div>
 		<div id="loading">Loading SWELLFACTOR.kap…</div>
 		<div id="drop">Drop a .kap file</div>
 		<div id="footer"><span id="tD">t = 0 ms</span><div id="tprog"><div id="tprog-fill"></div></div><span id="sInf">—</span></div>
 	</div>
 	<div id="info-panel">
 		<h3>Ripple Tank — forward wave field</h3>
+		<div class="warn">
+			<b>Demonstration only.</b> This is a ripple-tank analogue, not a ground-motion
+			prediction. Every charge is collapsed to a <b>single point source</b> at its deck
+			midpoint — a 10.7 m column becomes one point — so it carries <b>no axial energy
+			profile</b>: stemming, charge mid and base are not distinguished. Wavefronts are
+			spherical at constant velocity through a uniform half-space, with no anisotropy,
+			no attenuation beyond site-law spreading, and no reflection, refraction, mode
+			conversion or free-face interaction. Real pulse propagation in rock does none of
+			this. Read it for <b>timing and interference geometry</b> only.
+		</div>
 		<div class="stat" id="stat-file">—</div>
 		<div class="stat">Drag to orbit · scroll to zoom · click the surface to move the monitor ✚. Height and colour are signed ground motion (P then S front from every fired charge, site-law amplitude).</div>
 		<hr>
@@ -79,6 +97,7 @@ var P = {
 	waveletType: "ricker", displayComponent: "combined", cutoffDistance: 1.0,
 	gridCells: 110, maxSources: 250, ampClip: 200,
 	waveHeight: 0, wireframe: false, showGrid: true,
+	planeZ: 0, showTraces: true, showSources: false,
 	timeMs: 0, playing: false, playSpeed: 0.05,
 	monitorTargetPPV: 25, siteSigma: 0.22, seedKind: "berlage", fDom: 30, includeS: true, includeLove: false,
 	showFronts: false, showHoles: true
@@ -86,7 +105,17 @@ var P = {
 var kap = null, decks = [], sources = [], holesXY = [], bounds = null, lastFireS = 1, monitor = { x: 0, y: 0, z: 0 };
 var field = null, gridW = 0, gridH = 0;
 var idiRes = null, specRes = null, faRes = null;
-var lastT = 0, waveHeightCtrl = null, clipCtrl = null;
+var lastT = 0, waveHeightCtrl = null, clipCtrl = null, planeZCtrl = null;
+var zRange = { lo: 0, hi: 0 };
+
+function sourceCentroidZ(dks) {
+	var sum = 0, w = 0;
+	(dks || []).forEach(function (d) {
+		if (!(d.mass > 0)) return;
+		sum += ((d.topZ + d.baseZ) / 2) * d.mass; w += d.mass;
+	});
+	return w > 0 ? sum / w : 0;
+}
 
 function setStatus(t) { document.getElementById("sInf").textContent = t; }
 
@@ -111,12 +140,14 @@ var keyLight = new THREE.DirectionalLight(0xffffff, 0.85);
 keyLight.position.set(0.4, -1, 1.2);
 scene.add(keyLight);
 
-var origin = { x: 0, y: 0 };
+var origin = { x: 0, y: 0, z: 0 };
 var surfMesh = null, surfGeo = null, surfMat = null;
 var holePts = null, frontLines = null, monitorMark = null, gridHelper = null;
+var traceGrp = null, srcPts = null;
 
 function toLocalX(x) { return x - origin.x; }
 function toLocalY(y) { return y - origin.y; }
+function toLocalZ(z) { return z - origin.z; }
 
 // ── Load ──────────────────────────────────────────────────────────────
 async function loadKAP(source, name) {
@@ -124,7 +155,10 @@ async function loadKAP(source, name) {
 	try {
 		kap = await parseKAP(source, { loadSurfaces: false });
 		decks = kap.decks;
-		holesXY = kap.holes.map(function (h) { return { x: h.collarX, y: h.collarY, t: h.firstFireMs != null ? h.firstFireMs : h.holeTime }; });
+		holesXY = kap.holes.map(function (h) {
+			return { x: h.collarX, y: h.collarY, z: h.collarZ, toeX: h.toeX, toeY: h.toeY, toeZ: h.toeZ,
+			         t: h.firstFireMs != null ? h.firstFireMs : h.holeTime };
+		});
 		if (!decks.length) throw new Error("KAP has no charged decks — the ripple tank needs charging + timing");
 		bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
 		var tMax = 0;
@@ -142,6 +176,16 @@ async function loadKAP(source, name) {
 		// Render about the pattern centre so the mesh sits at the world origin
 		origin.x = (bounds.minX + bounds.maxX) / 2;
 		origin.y = (bounds.minY + bounds.maxY) / 2;
+		var zLo = Infinity, zHi = -Infinity;
+		kap.holes.forEach(function (h) {
+			zLo = Math.min(zLo, h.collarZ, h.toeZ); zHi = Math.max(zHi, h.collarZ, h.toeZ);
+		});
+		zRange = { lo: zLo, hi: zHi };
+		origin.z = (zLo + zHi) / 2;
+		// The membrane samples one elevation; start it at the charge centroid,
+		// which is where the point sources actually sit.
+		P.planeZ = sourceCentroidZ(kap.decks);
+		if (planeZCtrl) planeZCtrl.min(zLo - 5).max(zHi + 5).updateDisplay();
 		P.waveHeight = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * 0.06;
 		if (waveHeightCtrl) waveHeightCtrl.max(P.waveHeight * 5).updateDisplay();
 		document.getElementById("stat-file").innerHTML = "File: <b>" + name + "</b><br>Holes: <b>" + kap.holes.length + "</b> · Charged decks: <b>" + decks.length + "</b><br>Fire window: <b>0–" + tMax.toFixed(0) + " ms</b>";
@@ -197,6 +241,7 @@ function setupGrid() {
 		vertexColors: true, side: THREE.DoubleSide, shininess: 20, wireframe: P.wireframe
 	});
 	surfMesh = new THREE.Mesh(surfGeo, surfMat);
+	surfMesh.position.z = toLocalZ(P.planeZ);
 	scene.add(surfMesh);
 	drawFrame(true);
 }
@@ -204,7 +249,8 @@ function setupGrid() {
 // ── Ripple field → vertex displacement + colour ───────────────────────
 function computeField(tS) {
 	var rp = Object.assign(resolveRippleParams(P), { _resolved: true });
-	var pt = { x: 0, y: 0, z: monitor.z };
+	// The membrane samples a single elevation — slide it with "Membrane RL"
+	var pt = { x: 0, y: 0, z: P.planeZ };
 	var clip = P.ampClip;
 	var dx = (bounds.maxX - bounds.minX) / (gridW - 1);
 	var dy = (bounds.maxY - bounds.minY) / (gridH - 1);
@@ -271,26 +317,86 @@ function calibrateClip() {
 // ── Overlays ──────────────────────────────────────────────────────────
 function buildHoles() {
 	if (holePts) { scene.remove(holePts); holePts.geometry.dispose(); holePts.material.dispose(); holePts = null; }
+	if (traceGrp) { scene.remove(traceGrp); traceGrp = null; }
+	if (srcPts) { scene.remove(srcPts); srcPts.geometry.dispose(); srcPts.material.dispose(); srcPts = null; }
 	if (!holesXY.length || !bounds) return;
 	var span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+
+	// Collars, coloured by fire time
 	var pos = new Float32Array(holesXY.length * 3);
 	for (var i = 0; i < holesXY.length; i++) {
 		pos[i * 3] = toLocalX(holesXY[i].x);
 		pos[i * 3 + 1] = toLocalY(holesXY[i].y);
-		pos[i * 3 + 2] = 0;
+		pos[i * 3 + 2] = toLocalZ(holesXY[i].z);
 	}
 	var g = new THREE.BufferGeometry();
 	g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
 	g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(holesXY.length * 3), 3));
 	holePts = new THREE.Points(g, new THREE.PointsMaterial({
-		size: span * 0.007, sizeAttenuation: true, vertexColors: true, depthTest: false
+		size: span * 0.006, sizeAttenuation: true, vertexColors: true, depthTest: false
 	}));
 	holePts.renderOrder = 3;
 	scene.add(holePts);
+
+	// Full hole traces, split stemming / charge / subdrill. Drawn so the
+	// geometry the model actually uses is visible next to the real hole:
+	// the sources sit at the charge midpoints, not along the column.
+	var byHole = {};
+	decks.forEach(function (d) {
+		if (d.holeIndex == null) return;
+		var e = byHole[d.holeIndex];
+		if (!e) byHole[d.holeIndex] = { top: d, base: d };
+		else {
+			if (d.topZ > e.top.topZ) e.top = d;
+			if (d.baseZ < e.base.baseZ) e.base = d;
+		}
+	});
+	var stem = [], chg = [], sub = [];
+	for (var hi = 0; hi < holesXY.length; hi++) {
+		var h = holesXY[hi], e = byHole[hi];
+		var cx = toLocalX(h.x), cy = toLocalY(h.y), cz = toLocalZ(h.z);
+		var tx = toLocalX(h.toeX), ty = toLocalY(h.toeY), tz = toLocalZ(h.toeZ);
+		if (!e) { stem.push(cx, cy, cz, tx, ty, tz); continue; }
+		var ux = toLocalX(e.top.topX), uy = toLocalY(e.top.topY), uz = toLocalZ(e.top.topZ);
+		var bx = toLocalX(e.base.baseX), by = toLocalY(e.base.baseY), bz = toLocalZ(e.base.baseZ);
+		stem.push(cx, cy, cz, ux, uy, uz);
+		chg.push(ux, uy, uz, bx, by, bz);
+		sub.push(bx, by, bz, tx, ty, tz);
+	}
+	traceGrp = new THREE.Group();
+	traceGrp.add(segs(stem, 0xaa9977));   // stemming
+	traceGrp.add(segs(chg, 0xff88bb));    // charge column
+	traceGrp.add(segs(sub, 0x556066));    // subdrill
+	traceGrp.renderOrder = 3;
+	scene.add(traceGrp);
+
+	// The point sources the model really uses — one per deck, at its midpoint
+	var sp = new Float32Array(decks.length * 3);
+	for (var di = 0; di < decks.length; di++) {
+		var d = decks[di];
+		sp[di * 3] = toLocalX((d.topX + d.baseX) / 2);
+		sp[di * 3 + 1] = toLocalY((d.topY + d.baseY) / 2);
+		sp[di * 3 + 2] = toLocalZ((d.topZ + d.baseZ) / 2);
+	}
+	var sg = new THREE.BufferGeometry();
+	sg.setAttribute("position", new THREE.BufferAttribute(sp, 3));
+	srcPts = new THREE.Points(sg, new THREE.PointsMaterial({
+		size: span * 0.009, sizeAttenuation: true, color: 0xffe066, depthTest: false
+	}));
+	srcPts.renderOrder = 4;
+	scene.add(srcPts);
+}
+
+function segs(arr, colour) {
+	var g = new THREE.BufferGeometry();
+	g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(arr), 3));
+	return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: colour }));
 }
 
 var _hc = new THREE.Color();
 function updateHoles() {
+	if (srcPts) srcPts.visible = P.showSources;
+	if (traceGrp) traceGrp.visible = P.showHoles && P.showTraces;
 	if (!holePts) return;
 	holePts.visible = P.showHoles;
 	if (!P.showHoles) return;
@@ -371,12 +477,12 @@ function updateGridHelper() {
 		var span = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
 		gridHelper = new THREE.GridHelper(span, 20, 0x333340, 0x1e1e26);
 		gridHelper.rotation.x = Math.PI / 2;          // GridHelper is XZ by default
-		gridHelper.position.z = -P.waveHeight * 1.4;
 		gridHelper.material.transparent = true;
 		gridHelper.material.opacity = 0.5;
 		scene.add(gridHelper);
 	}
-	gridHelper.position.z = -P.waveHeight * 1.4;
+	// Sit the reference grid at the toes, below everything drawn
+	gridHelper.position.z = Math.min(toLocalZ(zRange.lo), -P.waveHeight) - 2;
 	gridHelper.visible = P.showGrid;
 }
 
@@ -391,6 +497,7 @@ function fitCamera() {
 function drawFrame(recompute) {
 	if (!bounds || !surfGeo) return;
 	if (recompute) computeField(P.timeMs / 1000);
+	if (surfMesh) surfMesh.position.z = toLocalZ(P.planeZ);
 	updateFronts();
 	updateHoles();
 	updateMonitorMark();
@@ -520,7 +627,13 @@ clipCtrl = fW.add(P, "ampClip", 10, 2000, 10).name("Amplitude clip (mm/s)").onCh
 fW.add({ auto: function () { calibrateClip(); drawFrame(true); } }, "auto").name("◎ Auto clip from field");
 fW.add(P, "showFronts").name("Wave-front rings").onChange(redraw);
 fW.add(P, "showHoles").name("Holes").onChange(redraw);
+fW.add(P, "showTraces").name("Full hole traces").onChange(redraw);
+fW.add(P, "showSources").name("Point sources (model)").onChange(redraw);
 var f3 = gui.addFolder("3D view");
+planeZCtrl = f3.add(P, "planeZ", 0, 1, 0.25).name("Membrane RL (m)").onChange(function () { drawFrame(true); });
+f3.add({ toSources: function () {
+	P.planeZ = sourceCentroidZ(decks); planeZCtrl.updateDisplay(); drawFrame(true);
+} }, "toSources").name("↧ Snap to source RL");
 waveHeightCtrl = f3.add(P, "waveHeight", 0, 100, 0.5).name("Wave height (m)").onChange(function () {
 	updateGridHelper(); drawFrame(true);
 });

@@ -44,6 +44,10 @@
 	.card ul { list-style: none; margin-top: 10px; font-size: 0.72rem; color: #777; font-family: 'Courier New', monospace; }
 	.card ul li { padding-left: 12px; position: relative; }
 	.card ul li::before { content: "·"; position: absolute; left: 2px; color: #555; }
+	.card ul li.caution { color: #d8a35a; margin-top: 6px; }
+	.card ul li.caution::before { content: "!"; color: #d8a35a; }
+	.note { border: 1px solid #7a4a12; background: #241a0c; color: #d8a35a; border-radius: 5px; padding: 10px 12px; font-size: 0.8rem; margin-top: 14px; }
+	.note b { color: #ffc879; }
 
 	table { width: 100%; border-collapse: collapse; font-size: 0.78rem; font-family: 'Courier New', monospace; }
 	th, td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid #262626; }
@@ -111,11 +115,12 @@
 	<a class="card" href="./ripple.html">
 		<div class="kicker">Timing · Signal</div>
 		<h3>Ripple Tank &amp; Frequency</h3>
-		<p>Forward wave field from the initiation sequence, with inter-detonation interval, FFT spectrum and a synthesised monitor trace.</p>
+		<p>Forward wave field from the initiation sequence as an orbitable 3D membrane, with inter-detonation interval, FFT spectrum and a synthesised monitor trace.</p>
 		<ul>
 			<li>constructive / destructive timing interference</li>
 			<li>IDI histogram and dominant frequency</li>
 			<li>forward array L / T / V synthesis</li>
+			<li class="caution">demonstration analogue — not a rock prediction</li>
 		</ul>
 	</a>
 
@@ -148,6 +153,16 @@
 	<code>.kap</code> file onto any viewport to run the models against your own blast — nothing
 	is uploaded, parsing and evaluation happen locally.
 </p>
+
+<div class="note">
+	<b>These are demonstrations, not engineering predictions.</b> The ripple tank in particular
+	is an idealised wave analogue: every charge collapses to a single point source at its deck
+	midpoint, so it carries no axial energy profile and does not distinguish stemming from
+	charge or base. Wavefronts are spherical at constant velocity through a uniform half-space
+	— no anisotropy, no reflection, refraction, mode conversion or free-face interaction. Real
+	pulse propagation in rock behaves nothing like this. Use these pages to reason about timing,
+	geometry and model behaviour; do not use them to size a blast or clear an exclusion zone.
+</div>
 
 <footer>
 	Brent Buffham · MIT licence ·
