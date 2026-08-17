@@ -751,7 +751,14 @@ function rebindPositionSliders() {
 	}
 }
 
-window.blastAnalysis = { P: P, state: state, requestAllPlanes: requestAllPlanes, get kap() { return kap; } };
+// buildPlanes reassigns `state`, so these must be getters — a captured
+// reference would freeze on the empty object created before the first load.
+window.blastAnalysis = {
+	P: P, requestAllPlanes: requestAllPlanes,
+	get state() { return state; },
+	get kap() { return kap; },
+	get box() { return box; }
+};
 
 // Step 18) Drag & drop + auto-load
 var drop = document.getElementById("drop");
