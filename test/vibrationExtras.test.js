@@ -38,6 +38,7 @@ describe("SiteLaw", () => {
         expect(fit.B).toBeCloseTo(B, 6);
         expect(fit.RSQ).toBeCloseTo(1, 6);
         expect(fit.K95).toBeGreaterThanOrEqual(fit.K50);
+        expect(fit.isPhysical).toBe(true);
         expect(fitSiteLaw(obs.slice(0, 2))).toBeNull();
     });
 
@@ -47,6 +48,25 @@ describe("SiteLaw", () => {
         expect(sitePPV(200, Q, Object.assign({ cutoffSD: 0 }, p))).toBeCloseTo(10, 6);
         expect(distanceForPPV(Q, 10, p)).toBeCloseTo(200, 6);
         expect(maxAllowableCharge(200, 0, p)).toBe(0);
+    });
+
+    it("inverses agree in refusing a non-physical fit (B ≤ 0) — issue #3", () => {
+        // five blasts at ~500 m / ~200 kg: SD clustered, regression lands on B < 0
+        const records = [
+            { D: 495, Q: 198, PVS: 3.9 },
+            { D: 505, Q: 205, PVS: 4.6 },
+            { D: 500, Q: 200, PVS: 4.1 },
+            { D: 512, Q: 190, PVS: 5.2 },
+            { D: 490, Q: 210, PVS: 4.4 }
+        ];
+        const fit = fitSiteLaw(records, { axis: "PVS" });
+        expect(fit.B).toBeLessThan(0);
+        expect(fit.isPhysical).toBe(false);
+        const p = { K: fit.K50, B: fit.B, chargeExponent: fit.chargeExponent };
+        expect(maxAllowableCharge(850, 5, p)).toBe(0);
+        expect(distanceForPPV(200, 5, p)).toBe(0);
+        expect(distanceForPPV(200, 5, { K: 1140, B: 0, chargeExponent: 0.5 })).toBe(0);
+        expect(distanceForPPV(200, 5, { K: 0, B: 1.6, chargeExponent: 0.5 })).toBe(0);
     });
 });
 

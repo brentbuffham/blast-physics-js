@@ -67,15 +67,15 @@ export function maxAllowableCharge(D, targetPPV, params) {
  * Distance (m) at which a charge Q produces exactly targetPPV.
  * @param {number} Q
  * @param {number} targetPPV
- * @param {Object} [params]
- * @returns {number}
+ * @param {Object} [params]   - { K=1140, B=1.6, chargeExponent=0.5 }
+ * @returns {number} m (0 when target/inputs invalid, including a non-physical B ≤ 0)
  */
 export function distanceForPPV(Q, targetPPV, params) {
     params = params || {};
     var K = params.K != null ? params.K : 1140;
     var B = params.B != null ? params.B : 1.6;
     var e = params.chargeExponent != null ? params.chargeExponent : 0.5;
-    if (!(Q > 0) || !(targetPPV > 0)) return 0;
+    if (!(Q > 0) || !(targetPPV > 0) || !(K > 0) || !(B > 0) || !(e > 0)) return 0;
     return Math.pow(K / targetPPV, 1 / B) * Math.pow(Q, e);
 }
 
@@ -86,8 +86,11 @@ export function distanceForPPV(Q, targetPPV, params) {
  * @param {Object} [opts]
  * @param {string} [opts.axis='VPPV']       - 'Tran' | 'Vert' | 'Long' | 'VPPV' | 'PVS'
  * @param {number} [opts.chargeExponent=0.5]
- * @returns {Object|null} { n, K50, K90, K95, B, RSQ, stderrLog, slope, intercept, points, axis, chargeExponent }
+ * @returns {Object|null} { n, K50, K90, K95, B, RSQ, stderrLog, slope, intercept, points, axis, chargeExponent, isPhysical }
  *   points[i] = { sd, ppv, logSD, logPPV, residualLog, isOutlier, obs }
+ *   isPhysical is false when B ≤ 0 (PPV not decaying with scaled distance) —
+ *   typical of a narrow SD range. The regression is still returned as fitted;
+ *   the inverses refuse such parameters.
  */
 export function fitSiteLaw(observations, opts) {
     opts = opts || {};
@@ -145,6 +148,7 @@ export function fitSiteLaw(observations, opts) {
     return {
         n: n, K50: K50, K90: K90, K95: K95, B: B, RSQ: RSQ,
         stderrLog: stderrLog, slope: slope, intercept: intercept,
-        points: points, axis: axis, chargeExponent: e
+        points: points, axis: axis, chargeExponent: e,
+        isPhysical: B > 0 && isFinite(K50) && K50 > 0
     };
 }

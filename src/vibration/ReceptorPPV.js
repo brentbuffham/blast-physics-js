@@ -237,7 +237,7 @@ export function evaluateReceptor(point, decks, params) {
         case "B": value = dom.deck.holeID != null ? dom.deck.holeID : dom.deck.holeIndex; break;
         case "C": value = target > 0 ? peak / target : null; break;
         case "D":
-            if (!(target > 0)) { value = null; break; }
+            if (!(target > 0) || !(p.K > 0) || !(p.B > 0) || !(p.chargeExponent > 0)) { value = null; break; }
             var SDt = Math.pow(p.K / target, 1 / p.B);
             value = Math.pow(dom.d / SDt, 1 / p.chargeExponent);
             break;
