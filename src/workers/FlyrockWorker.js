@@ -25,6 +25,7 @@ var GRAVITY = 9.80665;
 
 var ALGO_SHORT_CODES = {
     richardsMoore: "RM",
+    roth: "RO",
     lundborg: "LB",
     mckenzie: "MK"
 };

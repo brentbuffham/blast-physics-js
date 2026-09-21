@@ -45,12 +45,21 @@ describe("richardsMoore", () => {
 });
 
 describe("lundborg", () => {
-    it("returns positive clearance for 115mm hole", () => {
+    // ⏪ BEFORE 0.3.1 this asserted "~434 m for FoS=2" on a 115 mm hole, which
+    //    was the buggy value: the crater coefficient with a spurious feet-to-
+    //    metres conversion. The published equations are pinned properly in
+    //    flyrockPaperParity.test.js; these are the behavioural checks.
+    it("bench (the default) matches MK22 Eq.(2) for a 115 mm hole", () => {
         const r = lundborg({ holeDiamMm: 115, factorOfSafety: 2 });
-        expect(r.clearanceDistance).toBeGreaterThan(0);
-        // Wiki example: ~434m for FoS=2
-        expect(r.clearanceDistance).toBeGreaterThan(300);
-        expect(r.clearanceDistance).toBeLessThan(600);
+        expect(r.condition).toBe("bench");
+        expect(r.rangeMax).toBeCloseTo(4.6 * Math.pow(115, 2 / 3), 6);
+        expect(r.clearanceDistance).toBeCloseTo(r.rangeMax * 2, 9);
+    });
+
+    it("crater is the explicit opt-in, and is 6.5x further", () => {
+        const b = lundborg({ holeDiamMm: 115, factorOfSafety: 1 });
+        const c = lundborg({ holeDiamMm: 115, factorOfSafety: 1, lundborgCondition: "crater" });
+        expect(c.rangeMax / b.rangeMax).toBeCloseTo(30 / 4.6, 6);
     });
 
     it("larger diameter → larger range", () => {

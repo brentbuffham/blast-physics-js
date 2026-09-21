@@ -58,7 +58,8 @@ export { simulateDetonation, computeEmValues, processHoleDetonation } from "./de
 export { computeSequentialEm, computePrimerAwareEm } from "./detonation/EmComputation.js";
 
 // Flyrock
-export { richardsMoore, lundborg, mckenzie, envelopeAltitude } from "./flyrock/FlyrockTrajectory.js";
+export { richardsMoore, lundborg, mckenzie, roth, rothAtLaunchAngle,
+         envelopeAltitude, usedInputsFor, MODEL_INPUTS } from "./flyrock/FlyrockTrajectory.js";
 export { generateFlyrockShroud } from "./flyrock/FlyrockShroud.js";
 export { computeHoleSDoB, contributingMultiplier, sdobRiskBand, chargeColumnsFromDecks, computeSDoBAtPoint, SDoBModel } from "./flyrock/SDoB.js";
 export { ballisticRange, ballisticApex, ballisticFlightTime, optimalLaunchAngle, velocityForRange, sampleTrajectory, sphereDragConstant } from "./flyrock/Ballistics.js";

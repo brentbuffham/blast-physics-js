@@ -56,7 +56,7 @@ npm install blast-physics-js
 | **Damage** | Holmberg-Persson, Jointed Rock | mm/s, ratio |
 | **Pressure / energy** | Borehole Pressure, Powder Factor, Specific Explosive Energy | MPa, kg/m³, GJ/m³ |
 | **Detonation** | Multi-primer front propagation, Em computation | ms, kg^A |
-| **Flyrock** | Richards & Moore, Lundborg, McKenzie (SDoB), volumetric SDoB grid, ballistics (range / apex / flight time / drag) | metres, m/s |
+| **Flyrock** | Richards & Moore, Lundborg, McKenzie (SDoB), Roth (Gurney), volumetric SDoB grid, ballistics (range / apex / flight time / drag) | metres, m/s |
 | **Movement** | Voxel blast throw: Yang 3DMuck kinematic launch + sphere DEM transport (optional Rapier3D adapter), survey calibration | displacement vectors, swell, muckpile surface |
 | **IO** | Kirra `.kap` archives (holes, charging, primers, surfaces), Instantel / Texcel monitor CSVs | HoleEntry / DeckEntry / surfaces |
 
@@ -265,13 +265,41 @@ in Swedish igneous rock (NIOSH p29), or `PPVcrit = T·Vp/E` (Persson 1994 via On
 
 ## Flyrock Models
 
-Three algorithms with increasing conservatism:
+> ⚠️ **Corrected in 0.3.1.** Lundborg and McKenzie both carried transcription
+> errors. **If you computed a clearance zone with 0.3.0 or earlier, recompute it** —
+> see [Flyrock corrections in 0.3.1](#flyrock-corrections-in-031).
 
-| Model | Inputs | Basis |
-|-------|--------|-------|
-| **Richards & Moore** (2004) | Burden, stemming, explosive density, K | Face burst + cratering + stem eject |
-| **McKenzie** (2009/2022) | SDoB, hole diameter, stemming, density | Chiappetta Scaled Depth of Burial |
-| **Lundborg** (1975/1981) | Hole diameter only | Empirical upper-bound envelope |
+Four published algorithms. They are not a ladder of conservatism — they model
+different mechanisms and take different inputs:
+
+| Model | Inputs it actually uses | Basis |
+|-------|------------------------|-------|
+| **Richards & Moore** (2004) | Burden, stemming, explosive density, **K** | Face burst + cratering + stem eject |
+| **Lundborg** (1974) | Hole diameter, **bench/crater** | Empirical upper bound, MK22 Eqs (1)–(2) |
+| **McKenzie** (2009/2022) | SDoB, hole diameter, stemming, density† | Chiappetta Scaled Depth of Burial |
+| **Roth** (1979) | Burden, mass/m, VOD, **rock density** | Gurney charge-to-burden-mass ratio |
+
+† In McKenzie, rock density sets the **fragment size** that reaches the rim
+(Eq. 6), *not* the range — MK22 p.22 is explicit that density "does not affect
+maximum projection distance". **Roth is the only model here in which rock
+density changes the range**, and there it goes as `L ∝ 1/ρ`.
+
+`MODEL_INPUTS` and `usedInputsFor(algorithm, params)` record which inputs a
+model actually consumed, so a saved shroud never claims a parameter that had no
+effect on it. K belongs to Richards & Moore alone; a McKenzie result recording
+`K: 14` invites exactly the wrong conclusion.
+
+**Lundborg defaults to `bench`.** Crater is the confined, fully-buried single
+charge (misfire assessment); bench is a normal production blast with a free
+face. Running Eq. (1) on a bench pattern is not "being conservative" — it is
+the wrong equation by a factor of 6.5. Conservatism belongs in the Factor of
+Safety, where it is visible and adjustable.
+
+**Stem eject can never set the Richards & Moore envelope.**
+`stemEject = cratering · sin(2θ)` and `sin(2θ) ≤ 1`, so it never wins the
+`max()`; and its launch speed `√(stemEject·g/sin2θ)` collapses to
+`√(cratering·g)` exactly. The angle is reported for completeness but is not a
+dial — don't expose it as one.
 
 3D shroud generation using the Chernigovskii ballistic envelope.
 
@@ -396,6 +424,72 @@ indicative and its SHAPE is the published one. Use `ScaledHeelan`,
 `ScaledHeelanBlair` or `BlairMinchinton` when you need calibrated numbers.
 
 
+
+## Flyrock corrections in 0.3.1
+
+Two transcription errors, both in safety calculations, both ported from Kirra's
+corrected `FlyrockCalculator.js`. `test/flyrockPaperParity.test.js` now locks
+every model to a printed equation rather than to this library's own output — a
+snapshot test cannot catch a transcription error, and that is what these were.
+
+### Lundborg — wrong coefficient AND a spurious unit conversion
+
+```js
+// ⏪ BEFORE 0.3.1
+var Lmax_feet = 260.0 * Math.pow(holeDiamMm / 25.4, 2/3);
+var Lmax_m    = Lmax_feet * 0.3048;
+```
+
+Lundborg published the same throw in two equivalent forms, and that they agree
+numerically is the proof the result is **already metres**:
+
+```
+CRATER  L'max = 260 × ø_in^(2/3)  =  30  × ø_mm^(2/3)    [MK22 Eq.1]
+BENCH   L'max =  40 × ø_in^(2/3)  =  4.6 × ø_mm^(2/3)    [MK22 Eq.2]
+
+260 × (229/25.4)^(2/3) = 1126        30 × 229^(2/3) = 1123
+```
+
+The old code also used the **crater** coefficient unconditionally, with no
+bench/crater choice. For a 229 mm hole it returned 343.3 m — neither published
+equation:
+
+| | Range | vs old |
+|---|---|---|
+| Old code | 343.3 m | — |
+| Bench, Eq.(2) — **the new default** | 172.2 m | old was **1.99× too far** |
+| Crater, Eq.(1) | 1122.9 m | old was **0.31× — 3.3× too short** |
+
+### McKenzie — the 2/3 power reached SDoB
+
+```js
+// ⏪ BEFORE 0.3.1
+var Rmax = 9.74 * Math.pow(holeDiamMm / Math.pow(sDoB, 2.167), 2/3);
+```
+
+MK22 Eq.(5) is `L'max = 9.74 × SDoB^(−2.167) × ø_mm^(2/3)` — **three separate
+factors**. The old grouping pushed the 2/3 onto SDoB too, giving an effective
+exponent of −1.4447. The two forms agree only at SDoB ≈ 1, which is why it
+survived review:
+
+| SDoB | Old | Correct | Ratio |
+|---|---|---|---|
+| 0.638 (under-stemmed) | 697.1 m | 963.9 m | **0.72× — 267 m short** |
+| 1.037 | 346.0 m | 337.0 m | 1.03× |
+| 1.834 (well stemmed) | 151.8 m | 98.0 m | 1.55× |
+
+The under-prediction is at the dangerous end — badly-stemmed holes are the ones
+that actually throw. `rockDensity` was also accepted, defaulted, and never read;
+it now drives Eq. (6) fragment size.
+
+### Also in 0.3.1
+
+- **Roth (1979) added** — `roth()` and `rothAtLaunchAngle()`.
+- **`MODEL_INPUTS` / `usedInputsFor`** — so a result records only the inputs
+  that moved it.
+- **Richards & Moore was already correct** and is unchanged. It matches the
+  reference workbook to 0.03 %.
+
 ## Implementation Roadmap
 
 | Phase | Scope | Status |
@@ -424,7 +518,13 @@ indicative and its SHAPE is the published one. Use `ScaledHeelan`,
 - Gao, Q.D., Lu, W.B., Hu, Y.G., Chen, M. & Yan, P. (2015). *Comparison of the generation of shear wave with different simulation approaches*. Fragblast 11, Sydney, 79–87.
 - Chiappetta, R.F. & Treleven, J.P. (1997). *Scaled Depth of Burial concept for flyrock risk assessment*.
 - Richards, A.B. & Moore, A.J. (2004). *Flyrock control — by chance or design*. Proc. 30th ISEE Conf.
-- McKenzie, C. (2009/2022). *Flyrock range and fragment size prediction / validation*.
+- McKenzie, C.K. (2022). *Flyrock model validation and application*. Rock Fragmentation by
+  Blasting (Fragblast 13), X.G. Wang (ed), Metallurgical Industry Press, Beijing.
+  ISBN 978-7-5024-9269-4. Eqs (1)–(3) p.23; Eqs (4)–(7) p.24.
+- Lundborg, N. (1974). Maximum flyrock throw, via McKenzie (2022) Eqs (1) and (2).
+- Roth, J. (1979). *A Model for the Determination of Flyrock Range as a Function of Shot
+  Conditions*. Management Science Associates for the U.S. Bureau of Mines, Contract
+  J0387242. Equations pp.5–11.
 - Siskind, D.E. et al. (1980). *Structure response and damage produced by ground vibration from surface mine blasting*. USBM RI 8507.
 
 ## Related Projects

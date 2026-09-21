@@ -198,7 +198,7 @@ export function generateFlyrockShroud(holeData, params, onProgress) {
     if (allTriangles.length === 0) return null;
 
     var timestamp = new Date().toISOString().replace(/[:.]/g, "-").substring(0, 19);
-    var algoShort = { richardsMoore: "RM", lundborg: "LB", mckenzie: "MK" }[algorithm] || algorithm;
+    var algoShort = { richardsMoore: "RM", lundborg: "LB", mckenzie: "MK", roth: "RO" }[algorithm] || algorithm;
     var fos = params.factorOfSafety || 2;
 
     return {
