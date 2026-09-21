@@ -28,6 +28,16 @@
 
 var PI = Math.PI;
 
+/**
+ * Numeric parameter read that does NOT treat an explicit 0 as "missing".
+ * @param {*} v
+ * @param {number} dflt
+ * @returns {number}
+ */
+function num(v, dflt) {
+    return (v == null || Number.isNaN(Number(v))) ? dflt : Number(v);
+}
+
 var VP, VS, vsp, VPinv, VSinv, VPoverVS;
 var DT, bandwidth, sb1;
 var scalBase, chargeExp;
@@ -46,28 +56,32 @@ var gDMidX, gDMidY, gDMidZ;
 var gDCount = 0;
 
 function initConstants(mp) {
-    var poissonRatio = Math.max(0.01, Math.min(0.49, mp.poissonRatio || 0.25));
-    VP = mp.pWaveVelocity || 6000;
+    var poissonRatio = Math.max(0.01, Math.min(0.49, num(mp.poissonRatio, 0.25)));
+    VP = num(mp.pWaveVelocity, 6000);
     VS = VP / Math.sqrt(2.0 * (1.0 - poissonRatio) / (1.0 - 2.0 * poissonRatio));
     vsp = (VS * VS) / (VP * VP);
     VPinv = 1.0 / VP;
     VSinv = 1.0 / VS;
     VPoverVS = VP / VS;
 
-    var K = mp.K || 700;
-    var gamma = mp.gamma || 0.0455;
-    var siteB = mp.B || 1.5;
-    bandwidth = mp.bandwidth || 10000;
-    var dtFactor = mp.dtFactor || 0.125;
-    var NSP = mp.pulseOrder || 6;
+    // ⏪ BEFORE 0.3.0 every one of these used `mp.x || default`, so an explicit
+    //    0 — a legitimate value for gamma, B, chargeExponent and especially for
+    //    switching a term OFF — silently reverted to the default. Physical
+    //    quantities use `x == null ? default : x` throughout.
+    var K = num(mp.K, 700);
+    var gamma = num(mp.gamma, 0.0455);
+    var siteB = num(mp.B, 1.5);
+    bandwidth = num(mp.bandwidth, 10000);
+    var dtFactor = num(mp.dtFactor, 0.125);
+    var NSP = num(mp.pulseOrder, 6);
 
     DT = dtFactor / bandwidth;
     sb1 = siteB - 1.0;
     scalBase = gamma * K;
-    chargeExp = mp.chargeExponent || 0.7;
-    cutoff = mp.cutoffDistance || 0.5;
+    chargeExp = num(mp.chargeExponent, 0.7);
+    cutoff = num(mp.cutoffDistance, 0.5);
     cutoff2 = cutoff * cutoff;
-    maxDisplayDist = mp.maxDisplayDistance || 100;
+    maxDisplayDist = num(mp.maxDisplayDistance, 100);
     maxDD2 = maxDisplayDist * maxDisplayDist;
 
     Nm2 = NSP - 2;
@@ -78,9 +92,9 @@ function initConstants(mp) {
 }
 
 function preComputeElements(deckEntries, holeEntries, mp, displayTimeMs) {
-    var fallbackVOD = mp.detonationVelocity || 5279;
-    var fallbackExpDensity = mp.explosiveDensity || 1400;
-    var elemsPerDeck = mp.elemsPerDeck || 12;
+    var fallbackVOD = num(mp.detonationVelocity, 5000);   // DEFAULT_VOD
+    var fallbackExpDensity = num(mp.explosiveDensity, 1200);  // unused since 0.3.0
+    var elemsPerDeck = num(mp.elemsPerDeck, 12);
 
     var tPosX = [], tPosY = [], tPosZ = [];
     var tScalFacM = [];
@@ -123,10 +137,11 @@ function preComputeElements(deckEntries, holeEntries, mp, displayTimeMs) {
         var sinDipFV = hvZ / holeLen;
         var dip = 1.5707963 + Math.asin(Math.max(-1, Math.min(1, sinDipFV)));
 
-        var holeDiamMm = dk.holeDiamMm || 229;
-        var RAD = holeDiamMm / 2000.0;
-        var rhoE = dk.density > 0 ? dk.density * 1000.0 : fallbackExpDensity;
-        var fmelt = rhoE * PI * RAD * RAD * dL;
+        // Element mass from the DECK's own mass.
+        // ⏪ BEFORE 0.3.0: rhoE * PI * RAD * RAD * dL, built from the HOLE radius,
+        //    ignoring both dk.mass and dk.chargeDiamMm — a decoupled deck was
+        //    overweighted. Mirrors the same fix in BlairMinchinton.js.
+        var fmelt = dk.mass / elemsPerDeck;
 
         for (var m = 0; m < elemsPerDeck; m++) {
             var elemCenter = m + 0.5;
@@ -223,6 +238,9 @@ function computeStrip(startRow, endRow, totalCols, minX, minY, fallbackZ, cellX,
                 var theta = Math.acos(cosTheta);
                 var sinTheta = Math.sin(theta);
 
+                // Inlined blairSfacp / blairSfacs (see core/RadiationPattern.js).
+                // Kept inline so this file stays a dependency-free worker script;
+                // it must be changed in lockstep with RadiationPattern.js.
                 var cosphi2 = cosTheta * cosTheta;
                 var sfacp = 1.0 - 2.0 * vsp * cosphi2;
                 var sfacs = 2.0 * sinTheta * cosTheta;

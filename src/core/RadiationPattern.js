@@ -5,18 +5,27 @@
  * License: MIT
  *
  * References:
- *   Heelan (1953): F1, F2 patterns
- *   Blair & Minchinton (1996/2006): sfacp, sfacs patterns
+ *   Blair & Minchinton (2006) Eqs 4–5: sfacp, sfacs — the patterns every
+ *     model in this package uses.
+ *   heelanF1 / heelanF2: the pre-2026 patterns, retained for API compatibility
+ *     only. See their doc comments before using them.
  *   Blair (2015): near-axial regularisation (fud = 1.2)
  */
 
 /**
- * Heelan P-wave radiation pattern.
+ * Heelan P-wave radiation pattern — PRE-2026 PATTERN, RETAINED FOR API ONLY.
  *   F1(φ) = sin(2φ)·cos(φ) = 2·sinφ·cos²φ
  *
  * φ = 0 (axial) → F1 = 0
  * φ = π/4       → F1 = max
  * φ = π/2 (radial) → F1 = 0
+ *
+ * ⚠ This is NOT Blair & Minchinton (2006) Eqs 4–5, and no model in this
+ * package uses it any more. It puts P at zero and |SV| at maximum at φ = π/2,
+ * where the paper has only P-waves propagating — exactly the wrong way round.
+ * Use {@link blairSfacp} / {@link blairSfacs} for anything quantitative.
+ *
+ * ⏪ Used by ScaledHeelan.js and HeelanOriginal.js before 0.3.0.
  *
  * @param {number} sinPhi - sin of angle φ from hole axis
  * @param {number} cosPhi - cos of angle φ from hole axis
@@ -27,8 +36,10 @@ export function heelanF1(sinPhi, cosPhi) {
 }
 
 /**
- * Heelan SV-wave radiation pattern.
+ * Heelan SV-wave radiation pattern — PRE-2026 PATTERN, RETAINED FOR API ONLY.
  *   F2(φ) = sin(φ)·cos(2φ) = sinφ·(2cos²φ − 1)
+ *
+ * ⚠ See {@link heelanF1}. Not B&M Eqs 4–5; no model here uses it.
  *
  * @param {number} sinPhi
  * @param {number} cosPhi

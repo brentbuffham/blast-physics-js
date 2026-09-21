@@ -20,6 +20,7 @@
  */
 
 import { deriveSWaveVelocity } from "../core/RockMass.js";
+import { DEFAULT_VOD, DEFAULT_EXPLOSIVE_DENSITY, PULSE_PEAK_NORM } from "../core/Constants.js";
 import { blairSfacp, blairSfacs } from "../core/RadiationPattern.js";
 import { blairWaveform, pulseCutoff, pulseDuration as calcPulseDuration } from "../core/Waveform.js";
 
@@ -33,11 +34,14 @@ import { blairWaveform, pulseCutoff, pulseDuration as calcPulseDuration } from "
  * @param {number} [params.K=700]
  * @param {number} [params.B=1.5]
  * @param {number} [params.chargeExponent=0.7]
- * @param {number} [params.gamma=0.0455]
+ * @param {number} [params.gamma=0.0455]            - 1/max of the n = 6 pulse,
+ *                 B&M (2006) Eq 9. Normalises the pulse to unit peak so that
+ *                 K alone carries the site calibration. Rarely changed.
  * @param {number} [params.poissonRatio=0.25]
  * @param {number} [params.pWaveVelocity=6000]
- * @param {number} [params.detonationVelocity=5279] - fallback VOD
- * @param {number} [params.explosiveDensity=1400]   - fallback kg/m³
+ * @param {number} [params.detonationVelocity=5000] - fallback VOD
+ * @param {number} [params.explosiveDensity=1200]   - DEPRECATED, unused since
+ *                 0.3.0. Element mass now comes from the deck's own `mass`.
  * @param {number} [params.bandwidth=10000]
  * @param {number} [params.dtFactor=0.125]
  * @param {number} [params.pulseOrder=6]            - N
@@ -47,9 +51,9 @@ import { blairWaveform, pulseCutoff, pulseDuration as calcPulseDuration } from "
  */
 export function computeBlairMinchinton(point, deckEntries, holeEntries, params) {
     var p = Object.assign({
-        K: 700, B: 1.5, chargeExponent: 0.7, gamma: 0.0455,
+        K: 700, B: 1.5, chargeExponent: 0.7, gamma: PULSE_PEAK_NORM,
         poissonRatio: 0.25, pWaveVelocity: 6000,
-        detonationVelocity: 5279, explosiveDensity: 1400,
+        detonationVelocity: DEFAULT_VOD, explosiveDensity: DEFAULT_EXPLOSIVE_DENSITY,
         bandwidth: 10000, dtFactor: 0.125, pulseOrder: 6,
         elemsPerDeck: 12,
         cutoffDistance: 0.5
@@ -144,13 +148,15 @@ export function computeBlairMinchinton(point, deckEntries, holeEntries, params) 
             // Dip angle: π/2 + asin(dz/L)
             var dip = Math.PI / 2 + Math.asin(Math.max(-1, Math.min(1, hvZ / hLen)));
 
-            var holeDiamMm = dk.holeDiamMm || 229;
-            var RAD = holeDiamMm / 2000.0;
             var deckVOD = dk.vod > 0 ? dk.vod : p.detonationVelocity;
             var timingS = dk.timingMs / 1000.0;
-            var rho_e = dk.density > 0 ? dk.density * 1000.0 : p.explosiveDensity;
             var dL = deckLen / elemsPerDeck;
-            var fmelt = rho_e * Math.PI * RAD * RAD * dL;  // element mass (kg)
+            // Element mass from the DECK's own mass.
+            // ⏪ BEFORE 0.3.0: rho_e * PI * RAD * RAD * dL, built from the HOLE
+            //    radius, ignoring both dk.mass and dk.chargeDiamMm. A decoupled
+            //    deck was overweighted by (holeDiam/chargeDiam)^2 — about 2× at
+            //    the DECOUPLED default of 0.7·holeDiam.
+            var fmelt = dk.mass / elemsPerDeck;            // element mass (kg)
 
             var primerDepthInDeck = dk.primerFraction * deckLen;
             var primerElemPos = dk.primerFraction * elemsPerDeck;
@@ -228,9 +234,9 @@ export function computeBlairMinchinton(point, deckEntries, holeEntries, params) 
 export class BlairMinchintonModel {
     constructor(params) {
         this.params = Object.assign({
-            K: 700, B: 1.5, chargeExponent: 0.7, gamma: 0.0455,
+            K: 700, B: 1.5, chargeExponent: 0.7, gamma: PULSE_PEAK_NORM,
             poissonRatio: 0.25, pWaveVelocity: 6000,
-            detonationVelocity: 5279, explosiveDensity: 1400,
+            detonationVelocity: DEFAULT_VOD, explosiveDensity: DEFAULT_EXPLOSIVE_DENSITY,
             bandwidth: 10000, dtFactor: 0.125, pulseOrder: 6,
             elemsPerDeck: 12,
             cutoffDistance: 0.5

@@ -51,7 +51,7 @@ var REGISTRY = {
 	boreholePressure:  { name: "Borehole Pressure",   unit: "MPa",        cost: 1,  build: function () { return new BoreholePressureModel(); } },
 	see:               { name: "Specific Energy",     unit: "GJ/m3",      cost: 1,  build: function () { return new SEEModel(); } },
 	sdob:              { name: "Scaled Depth of Burial", unit: "m/kg^1/3", cost: 2, build: buildSDoB },
-	holmbergPersson:   { name: "Holmberg-Persson",    unit: "DI",         cost: 3,  build: function () { return new HolmbergPerssonDamageModel({ ppvCritical: 700 }); } },
+	holmbergPersson:   { name: "Holmberg-Persson",    unit: "mm/s",       cost: 3,  build: function () { return new HolmbergPerssonDamageModel(); } },
 	jointedRock:       { name: "Jointed Rock",        unit: "ratio",      cost: 3,  build: function () { return new JointedRockDamageModel(); } },
 	heelanOriginal:    { name: "Heelan Original",     unit: "mm/s",       cost: 25, build: function () { return new HeelanOriginalModel(HEELAN); } },
 	scaledHeelan:      { name: "Scaled Heelan",       unit: "mm/s",       cost: 30, build: function () { return new ScaledHeelanModel(HEELAN); } },

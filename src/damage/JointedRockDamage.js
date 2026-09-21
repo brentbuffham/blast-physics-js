@@ -5,6 +5,7 @@
  * License: MIT
  *
  * 1. Compute PPV via Holmberg-Persson integration along each deck
+ *    (published form: sum the geometric term, then raise to α once)
  * 2. Convert PPV to dynamic stress: σ_d = ρ_rock × Vp × PPV (unit conversion included)
  * 3. Intact rock fracture ratio: FR_rock = σ_d / σ_t
  * 4. Mohr-Coulomb joint failure: FR_joint = τ / (c + μ × σ_n)
@@ -42,6 +43,7 @@ export function computeJointedRockDamage(point, deckEntries, params) {
     }, params || {});
 
     var K = p.K_hp, alpha = p.alpha_hp, beta = p.beta_hp;
+    var betaOverAlpha = beta / alpha;
     var cutoff = p.cutoffDistance;
     var elemsPerDeck = p.elemsPerDeck;
 
@@ -65,7 +67,10 @@ export function computeJointedRockDamage(point, deckEntries, params) {
         var linearDensity = dk.mass / deckLen;
         var q = linearDensity * dL;
 
-        var sumPPV2 = 0.0;
+        // Σ w_i · R_i^(−β/α), then raised to α once — see HolmbergPersson.
+        // ⏪ BEFORE 0.3.0: var ppv_i = K*pow(q,alpha)/pow(R,beta); sumPPV2 += ppv_i*ppv_i;
+        //    then ppv = sqrt(sumPPV2) — element-count dependent, never converged.
+        var sumGeom = 0.0;
         for (var m = 0; m < elemsPerDeck; m++) {
             var elemOffset = (m + 0.5) * dL;
             var eX = topX + dirX * elemOffset;
@@ -73,11 +78,10 @@ export function computeJointedRockDamage(point, deckEntries, params) {
             var eZ = topZ + dirZ * elemOffset;
             var dx = point.x - eX, dy = point.y - eY, dz = point.z - eZ;
             var R = Math.max(Math.sqrt(dx * dx + dy * dy + dz * dz), cutoff);
-            var ppv_i = K * Math.pow(q, alpha) / Math.pow(R, beta);
-            sumPPV2 += ppv_i * ppv_i;
+            sumGeom += q * Math.pow(R, -betaOverAlpha);
         }
 
-        var ppv = Math.sqrt(sumPPV2);  // mm/s
+        var ppv = K * Math.pow(sumGeom, alpha);  // mm/s
 
         // Convert PPV (mm/s) to dynamic stress (MPa)
         // σ_d = ρ × Vp × PPV × 1e-3 / 1e6 = ρ × Vp × PPV × 1e-9

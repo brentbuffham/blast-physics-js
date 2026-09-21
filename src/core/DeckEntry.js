@@ -12,6 +12,8 @@
  *   DECOUPLED — chargeDiamMm = product physical diameter (air gap present)
  */
 
+import { DEFAULT_VOD, DEFAULT_HOLE_DIAM_MM } from "./Constants.js";
+
 export const DECK_TYPES = ["COUPLED", "DECOUPLED", "INERT", "SPACER"];
 
 /**
@@ -44,8 +46,14 @@ export function createDeckEntry(params) {
             throw new Error("DeckEntry: missing required field " + requiredCoords[i]);
         }
     }
+    // An explicit 0 must not silently become the default: `x || d` treats a
+    // legitimate zero as missing. ⏪ BEFORE 0.3.0 every numeric field below
+    // used Number(params.x || default).
+    var num = function (v, dflt) {
+        return (v == null || v === "" || Number.isNaN(Number(v))) ? dflt : Number(v);
+    };
     var deckType    = params.deckType    || "COUPLED";
-    var holeDiamMm  = Number(params.holeDiamMm  || 115);
+    var holeDiamMm  = num(params.holeDiamMm, DEFAULT_HOLE_DIAM_MM);
     var chargeDiamMm;
     if (params.chargeDiamMm !== undefined && params.chargeDiamMm !== null) {
         chargeDiamMm = Number(params.chargeDiamMm);
@@ -60,15 +68,15 @@ export function createDeckEntry(params) {
         baseX:          Number(params.baseX),
         baseY:          Number(params.baseY),
         baseZ:          Number(params.baseZ),
-        mass:           Number(params.mass       || 0),
-        density:        Number(params.density    || 1.2),
-        vod:            Number(params.vod        || 5000),
+        mass:           num(params.mass, 0),
+        density:        num(params.density, 1.2),
+        vod:            num(params.vod, DEFAULT_VOD),
         productName:    params.productName       || "",
         holeDiamMm:     holeDiamMm,
         chargeDiamMm:   chargeDiamMm,
-        timingMs:       Number(params.timingMs   || 0),
-        holeIndex:      Number(params.holeIndex  || 0),
-        primerFraction: Number(params.primerFraction !== undefined ? params.primerFraction : 1.0)
+        timingMs:       num(params.timingMs, 0),
+        holeIndex:      num(params.holeIndex, 0),
+        primerFraction: num(params.primerFraction, 1.0)
     };
 }
 

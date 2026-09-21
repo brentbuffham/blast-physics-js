@@ -30,6 +30,12 @@ It is the physics companion to [Kirra](https://github.com/brentbuffham/Kirra) �
 npm install blast-physics-js
 ```
 
+> **0.3.0 changes published numbers.** Several models disagreed with the papers
+> they cite; the corrections are listed under
+> [Breaking changes in 0.3.0](#breaking-changes-in-030) below. If you have
+> results computed with 0.2.x, read that section before comparing.
+
+
 ## Features
 
 - **Zero rendering dependencies** — no Three.js, no WebGL, no DOM. Pure computational library.
@@ -47,7 +53,7 @@ npm install blast-physics-js
 | **Site law** | Regression (K50/K90/K95, B, σ), inverse (max allowable charge / distance), receptor evaluation (peak, coherence-window RMS, compliance, dominant hole), Blair 2011 Probability of Exceedance | mm/s, kg, P |
 | **Ripple tank** | Coherent forward wave field — P and S fronts from every charge, Ricker / Gaussian / damped / Berlage / measured wavelets | signed mm/s |
 | **Signal** | FFT, IDI, impulse-train spectrum, time-window (MIC) histogram, seed-wavelet superposition (linear + Blair non-linear), 3-component forward-array synthesis with Love waves, spectral-division signature deconvolution, detune / constrain | Hz, mm/s |
-| **Damage** | Holmberg-Persson, Jointed Rock | Damage index |
+| **Damage** | Holmberg-Persson, Jointed Rock | mm/s, ratio |
 | **Pressure / energy** | Borehole Pressure, Powder Factor, Specific Explosive Energy | MPa, kg/m³, GJ/m³ |
 | **Detonation** | Multi-primer front propagation, Em computation | ms, kg^A |
 | **Flyrock** | Richards & Moore, Lundborg, McKenzie (SDoB), volumetric SDoB grid, ballistics (range / apex / flight time / drag) | metres, m/s |
@@ -94,6 +100,7 @@ const grid = computeScaledHeelan(
   deckEntries,
   holeEntries,
   { minX: 0, minY: 0, maxX: 200, maxY: 200, cellSize: 1.0, elevation: 0 },
+  // chargeExponent is e in D/W^e; the mass exponent A = e·B is derived from it
   { K: 1140, B: 1.6, chargeExponent: 0.5, elemsPerDeck: 12 }
 );
 // Returns: GridResult { data: Float32Array, rows, cols, minX, minY, cellX, cellY, unit, model }
@@ -248,7 +255,11 @@ Captures constructive/destructive interference. O(n × M × T) per point. Web Wo
 
 ## Damage Models
 
-**Holmberg-Persson**: Near-field damage index via sub-element integration. DI = peakPPV / PPV_critical.
+**Holmberg-Persson**: Near-field PPV (mm/s) via sub-element integration, in the published form
+`PPV = K·[Σ w·R^(−β/α)]^α` — the sum is raised to α once, so the result converges in
+`elemsPerDeck`. Compare it against a critical PPV yourself: 700–1000 mm/s for new cracks
+in Swedish igneous rock (NIOSH p29), or `PPVcrit = T·Vp/E` (Persson 1994 via Onederra Eq 11).
+**Changed in 0.3.0** — this returned `peakPPV / ppvCritical` as a unitless damage index before.
 
 **Jointed Rock**: Combined intact rock fracture (σ_d / σ_t) and Mohr-Coulomb joint failure (τ / (c + μσ_n)).
 
@@ -350,6 +361,44 @@ blast-physics-js/
   dist/
 ```
 
+## Breaking changes in 0.3.0
+
+Every item here is a place where the code and the published equation disagreed.
+Each source file carries a `⏪ BEFORE 0.3.0` block with the old expression, so a
+result computed with 0.2.x can still be explained.
+
+**Sources.** Blair & Minchinton (2006) Fragblast-8; Blair (2008) IJRMMS 45;
+Blair (2010) Fragblast-9; Blair & Armstrong (1999) Fragblast 3;
+NIOSH (Iverson, Kerkering & Hustrulid 2008); Onederra & Esen (2004).
+
+| # | Change | Effect on published numbers |
+|---|---|---|
+| 1 | **Holmberg-Persson sums first, then raises to α once** (`PPV = K·[Σ w·R^(−β/α)]^α`). The old form raised each element to α and RMS-summed, which never converged. | ~34 % higher at 8 elements, and the answer no longer depends on `elemsPerDeck`. Pinned by the NIOSH worked example: a 3 m column at 1 kg/m, 2 m away at mid-column height → **476 mm/s**. |
+| 2 | **`computeHolmbergPerssonDamage` returns PPV in mm/s**, not `peakPPV / ppvCritical`. `ppvCritical` is no longer a parameter. | Divide by your own threshold to recover the old ratio. `computeGrid` now reports `unit: "mm/s"`. |
+| 3 | **`ScaledHeelan` and `HeelanOriginal` use the Blair patterns** (`blairSfacp` / `blairSfacs`), not `heelanF1` / `heelanF2`. The old pair put P at zero and |SV| at maximum at φ = π/2, the reverse of B&M Eqs 4–5. | PPV was non-monotonic in distance — it read higher at 20 m than at 10 m. `heelanF1`/`heelanF2` are still exported but no model uses them. |
+| 4 | **`ScaledHeelanBlair` applies the α/β = Vp/Vs factor on SV** (B&M Eq 11), as `BlairMinchinton` always did. | S was under-weighted by ≈ 1.73. |
+| 5 | **The mass exponent A is derived as `chargeExponent × B`**, not taken as `chargeExponent`. Blair 2008 Eq 14: `a·(√W/d)^b ≡ K·W^A·d^(−B)`, so A = e·B — 0.8 for the default B = 1.6, not 0.5. | ~3.3× higher for an 80 kg deck. `chargeExponent` keeps its scaled-distance meaning (the `e` in `D/W^e`), which is what `SiteLaw.js` and `PPV.js` have always meant by it. Pass `massExponent` to set A directly. |
+| 6 | **Q attenuation is OFF by default on the scaled models** (`qualityFactorP`/`S` default to 0). The `R^(−(B−1))` in the site law already IS the material attenuation (B&M p5). | Higher in the far field. Enabling Q double-counts; it is honoured for experimentation only. Q still applies to `HeelanOriginal`, which has no site law. |
+| 7 | **Qp and Qs gate independently.** Previously both were gated on `Qp > 0`, so `Qs = 0` with `Qp > 0` gave `exp(−∞) = 0` and an S term that vanished silently. | Affects anyone who set `Qs: 0`. |
+| 8 | **Elements sum linearly, not RMS**, and are counted from the primer, so `ScaledHeelan` now honours `primerFraction` (it ignored it entirely). | The sum telescopes to `M^A` and conserves charge (Blair 2008 p237). |
+| 9 | **`HeelanOriginal` shares one constant between P and SV**, with μ = ρ·Vs² (B&M Eq 6) — the rock enters only through the shear modulus — and evaluates ω at the dominant frequency of the n = 6 pulse, `2π·0.0597·b`, rather than `VOD/(2a)`. | Very large. The old form was dimensionally wrong (m²/s, not m/s) and its ω erased the far field — attenuation of 2.4e−5 at 100 m. See the ⚠ OPEN note in the source: the absolute level is still uncalibrated. |
+| 10 | **Element mass comes from the deck's own `mass`** in `BlairMinchinton` and `BlairHeavyWorker`, not from `ρₑ·π·RAD²·dL` built on the HOLE radius. | A decoupled deck was overweighted by `(holeDiam/chargeDiam)²` — about 2× at the `DECOUPLED` default. |
+| 11 | **One named VOD fallback**, `DEFAULT_VOD = 5000`, exported from `core/Constants.js`. | Was 5000, 5279 and 5500 in three different files. |
+| 12 | **An explicit `0` is no longer replaced by the default** in `createDeckEntry` or in `BlairHeavyWorker`'s parameter reads. | `Number(x || default)` treated a legitimate zero as missing. |
+
+### Known residual
+
+The primer-ordering term `f_j = |(m + ½) − primerElemPos| + 1` is one-sided, and
+over-counts a mid-column primer against Blair 2008 Eq 22 by roughly 9–13 %
+(A-dependent), while under-counting an end-primed deck by about 3 %. This is
+kept deliberately, to match Kirra and Blair's own Python, and is pinned by a
+test rather than left undocumented.
+
+`HeelanOriginal` currently differs from Kirra: the ω² in its source term follows
+from a dimensional check that Kirra has not applied. Treat that model as
+qualitative until the two are reconciled.
+
+
 ## Implementation Roadmap
 
 | Phase | Scope | Status |
@@ -392,6 +441,7 @@ blast-physics-js/
 - [blastingapps.com](https://blastingapps.com)
 - [kirra-design.com](https://kirra-design.com)
 - [Buy Me a Coffee](https://buymeacoffee.com/brentbuffham)
+
 
 ## License
 
