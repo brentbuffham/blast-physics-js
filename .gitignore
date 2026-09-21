@@ -3,3 +3,8 @@ dist/
 dist-pages/
 .DS_Store
 *.local
+
+# AI planning / commentary notes stay local. This repo is public and MIT, and
+# these reference private Kirra work and internal reports by name.
+aiPlans/
+aiCommentary/
