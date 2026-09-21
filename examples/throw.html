@@ -4,34 +4,53 @@
 <meta charset="UTF-8">
 <title>blast-physics-js — Blast Throw / Muckpile Simulator</title>
 <style>
+	/* ── Kirra brand tokens ──────────────────────────────────────────
+	   Copied from Kirra's src/kirra.css :root, not invented here. The accent is
+	   RED, app-wide. A plausible-looking variable name is not a brand — read a
+	   token. Keep in step with kirra.css if these change there. */
+	:root {
+		--kirra-accent: #ff0000;          /* --kirra-accent / --mouseover-color */
+		--kirra-accent-press: #cc0000;    /* --click-color   */
+		--kirra-accent-soft: #ff5555;     /* --selected-color */
+		--kirra-accent-bg: var(--kirra-accent-bg);       /* red-tinted dark, for an active chip */
+		--kirra-bg: #1a1a1a;              /* --dark-mode-color  */
+		--kirra-canvas: #000000;          /* --dark-mode-canvas */
+		--kirra-text: #d9d9d9;            /* --dark-mode-text   */
+		--kirra-border: #4d4d4d;          /* --dark-mode-border */
+		--kirra-muted: #9a9a9a;           /* --light-mode-border, as a muted grey */
+		--kirra-dim: #828282;             /* --primary-color    */
+		--kirra-disabled: #736363;        /* --disabled-color   */
+		--kirra-font: Arial, Helvetica, sans-serif;
+	}
+
 	* { margin: 0; padding: 0; box-sizing: border-box; }
-	body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #d0d0d0; overflow: hidden; }
-	#nav { height: 34px; background: #0d0d0d; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 4px; padding: 0 10px; font-size: 0.74rem; }
+	body { font-family: var(--kirra-font); background: var(--kirra-bg); color: var(--kirra-text); overflow: hidden; }
+	#nav { height: 34px; background: #0d0d0d; border-bottom: 1px solid var(--kirra-border); display: flex; align-items: center; gap: 4px; padding: 0 10px; font-size: 0.74rem; }
 	#nav .brand { font-family: 'Courier New', monospace; color: #888; margin-right: 14px; white-space: nowrap; }
-	#nav .brand b { color: #cc2222; font-weight: normal; }
+	#nav .brand b { color: var(--kirra-accent); font-weight: normal; }
 	#nav a { color: #aaa; text-decoration: none; padding: 4px 10px; border-radius: 4px; border: 1px solid transparent; white-space: nowrap; }
 	#nav a:hover { color: #fff; background: #1e1e1e; border-color: #3a3a3a; }
-	#nav a.on { color: #fff; background: #2a1414; border-color: #cc2222; }
+	#nav a.on { color: #fff; background: var(--kirra-accent-bg); border-color: var(--kirra-accent); }
 	#nav .spacer { flex: 1; }
 	#app { display: flex; height: calc(100vh - 34px); }
 	#viewport { flex: 1; position: relative; }
 	#info-panel {
-		width: 250px; min-width: 200px; background: #111; border-left: 1px solid #333;
+		width: 250px; min-width: 200px; background: #111; border-left: 1px solid var(--kirra-border);
 		padding: 10px 12px; font-size: 0.72rem; font-family: 'Courier New', monospace;
 		overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
 	}
-	#info-panel h3 { color: #cc2222; font-size: 0.8rem; margin-bottom: 4px; }
+	#info-panel h3 { color: var(--kirra-accent); font-size: 0.8rem; margin-bottom: 4px; }
 	#info-panel .stat { color: #999; line-height: 1.6; word-break: break-word; }
-	#info-panel .stat b { color: #d0d0d0; }
-	#info-panel hr { border: none; border-top: 1px solid #333; margin: 4px 0; }
-	#info-panel a { color: #6aa0ff; }
+	#info-panel .stat b { color: var(--kirra-text); }
+	#info-panel hr { border: none; border-top: 1px solid var(--kirra-border); margin: 4px 0; }
+	#info-panel a { color: var(--kirra-accent-soft); }
 	#legend-bar { height: 14px; border-radius: 3px; margin-top: 4px; }
 	.legend-row { display: flex; justify-content: space-between; font-size: 0.65rem; color: #888; margin-top: 2px; }
 	#footer { position: absolute; left: 0; right: 0; bottom: 0; height: 26px; background: rgba(0,0,0,0.6); display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 0.72rem; }
-	#prog { flex: 1; height: 8px; background: #333; border-radius: 4px; cursor: pointer; }
-	#prog-fill { height: 100%; width: 0%; background: #cc2222; border-radius: 4px; }
+	#prog { flex: 1; height: 8px; background: var(--kirra-border); border-radius: 4px; cursor: pointer; }
+	#prog-fill { height: 100%; width: 0%; background: var(--kirra-accent); border-radius: 4px; }
 	#drop { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(204,34,34,0.25); font-size: 1.4rem; pointer-events: none; }
-	#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #cc2222; font-size: 1.2rem; z-index: 100; }
+	#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: var(--kirra-accent); font-size: 1.2rem; z-index: 100; }
 	.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #444; }
 	.dot.on { background: #2c2; }
 </style>

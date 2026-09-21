@@ -16,6 +16,7 @@ import { blairSfacp, blairSfacs, heelanF1, heelanF2 } from "../src/core/Radiatio
 import { createDeckEntry } from "../src/core/DeckEntry.js";
 import { createHoleEntry } from "../src/core/HoleEntry.js";
 import { DEFAULT_VOD } from "../src/core/Constants.js";
+import { blairIncrement, blairPrimerElement, blairPatternP, blairPatternS } from "../src/core/BlairScaledHeelan.js";
 
 const DEG = Math.PI / 180;
 
@@ -45,6 +46,15 @@ describe("§2 radiation patterns — only P propagates at φ = 90°", () => {
         const sfacp = blairSfacp(cosPhi, vsp);
         expect(sfacp).toBeCloseTo(1.0, 8);
         expect(blairSfacs(sinPhi, cosPhi, sfacp)).toBeCloseTo(0, 8);
+    });
+
+    it("the Kirra-shaped helpers agree, and S carries Vp/Vs", () => {
+        const vsOverVp = Math.sqrt(vsp);
+        const sinPhi = Math.sin(35 * DEG), cosPhi = Math.cos(35 * DEG);
+        expect(blairPatternP(cosPhi, vsOverVp)).toBeCloseTo(blairSfacp(cosPhi, vsp), 10);
+        // Eq 11 folds α/β into the S pattern, so it is (Vp/Vs)·sin2φ.
+        expect(blairPatternS(sinPhi, cosPhi, vsOverVp))
+            .toBeCloseTo((1 / vsOverVp) * 2 * sinPhi * cosPhi, 10);
     });
 
     it("the pre-2026 heelanF1/F2 have it exactly the wrong way round", () => {
@@ -88,72 +98,71 @@ describe("§2 the α/β = Vp/Vs factor on SV (B&M Eq 11)", () => {
     });
 });
 
-// ------------------------------------------------------------- §3 A = e·B
+// --------------------------------------------------------- §3 charge exponent
 
-describe("§3 the mass exponent A is derived as e·B, not taken as e", () => {
-    // Blair 2008 Eq 14 p241: a·(√W/d)^b ≡ K·W^A·d^(−B), so A = e·B.
-    // ⏪ BEFORE 0.3.0 `chargeExponent: 0.5` was used directly as A, which is
-    //    the scaled-distance exponent, not the mass exponent. The two mean
-    //    different things and only one of them is 0.5.
+describe("§3 chargeExponent is Blair's A, and defaults to B/2", () => {
+    // Blair 2008 Eq 14 p241: a·(√W/d)^b ≡ K·W^A·d^(−B), so A = b/2 = 0.8
+    // for the default B = 1.6.
+    // ⏪ BEFORE 0.3.0 the default was 0.5 — the SCALED-DISTANCE exponent e,
+    //    which is what SiteLaw.js and PPV.js still mean by the same name.
+    //    A and e are different quantities related by A = e·B.
     const at = { x: 30, y: 0, z: 0 };
 
-    it("default e = 0.5, B = 1.6 behaves as A = 0.8", () => {
-        const implicit = computeScaledHeelan(at, [deck], [hole], {});
-        const explicitA = computeScaledHeelan(at, [deck], [hole], { massExponent: 0.8 });
-        expect(implicit).toBeCloseTo(explicitA, 6);
+    it("defaults to A = 0.8", () => {
+        const dflt = computeScaledHeelan(at, [deck], [hole], {});
+        const explicit = computeScaledHeelan(at, [deck], [hole], { chargeExponent: 0.8 });
+        expect(dflt).toBeCloseTo(explicit, 6);
     });
 
-    it("it is NOT the old A = 0.5 behaviour", () => {
+    it("is NOT the old A = 0.5 default", () => {
         const now = computeScaledHeelan(at, [deck], [hole], {});
-        const old = computeScaledHeelan(at, [deck], [hole], { massExponent: 0.5 });
+        const old = computeScaledHeelan(at, [deck], [hole], { chargeExponent: 0.5 });
         expect(now / old).toBeGreaterThan(2);   // ~3.3× for an 80 kg deck
     });
 
-    it("generalises to a cube-root site law", () => {
-        const cube = computeScaledHeelan(at, [deck], [hole], { chargeExponent: 1 / 3 });
-        const explicitA = computeScaledHeelan(at, [deck], [hole], { massExponent: 1.6 / 3 });
-        expect(cube).toBeCloseTo(explicitA, 6);
+    it("ScaledHeelanBlair carries the same default", () => {
+        const dflt = computeScaledHeelanBlair(at, [deck], [hole], {});
+        const explicit = computeScaledHeelanBlair(at, [deck], [hole], { chargeExponent: 0.8 });
+        expect(dflt).toBeCloseTo(explicit, 6);
     });
 
-    it("massExponent overrides the derivation for an expert caller", () => {
-        const v = computeScaledHeelanBlair(at, [deck], [hole], { massExponent: 0.7, chargeExponent: 0.5 });
-        const w = computeScaledHeelanBlair(at, [deck], [hole], { massExponent: 0.7, chargeExponent: 0.9 });
-        expect(v).toBeCloseTo(w, 6);
+    it("A = e·B relates the two conventions", () => {
+        // A caller holding a square-root site-law fit (e = 0.5, B = 1.6) should
+        // pass A = 0.8. This documents the conversion rather than doing it
+        // silently, because Kirra takes chargeExponent as A directly.
+        const e = 0.5, B = 1.6;
+        expect(e * B).toBeCloseTo(0.8, 10);
     });
 });
 
 // ------------------------------------------------------------------- §4 Q
 
-describe("§4 Q attenuation is off by default on the SCALED models", () => {
-    // The R^(−(B−1)) in the site law already IS the material attenuation
-    // (B&M p5); exp(−ωR/2QV) on top double-counts it.
+describe("§4 Q is GONE from the scaled models", () => {
+    // B&M p5: the R^(−(B−1)) in the site law IS the material attenuation —
+    // that is why the scaled model exists. Applying exp(−ωR/2QV) on top
+    // double-counts it, so Kirra removed Q from these models entirely.
     const at = { x: 60, y: 0, z: 0 };
 
-    it("ScaledHeelan ignores Q unless asked", () => {
-        const dflt = computeScaledHeelan(at, [deck], [hole], {});
-        const off = computeScaledHeelan(at, [deck], [hole], { qualityFactorP: 0, qualityFactorS: 0 });
-        expect(dflt).toBeCloseTo(off, 6);
+    it("ScaledHeelan ignores any Q the caller passes", () => {
+        const none = computeScaledHeelan(at, [deck], [hole], {});
+        const withQ = computeScaledHeelan(at, [deck], [hole], { qualityFactorP: 50, qualityFactorS: 30 });
+        expect(withQ).toBeCloseTo(none, 10);
     });
 
-    it("ScaledHeelanBlair ignores Q unless asked", () => {
-        const dflt = computeScaledHeelanBlair(at, [deck], [hole], {});
-        const off = computeScaledHeelanBlair(at, [deck], [hole], { qualityFactorP: 0, qualityFactorS: 0 });
-        expect(dflt).toBeCloseTo(off, 6);
+    it("ScaledHeelanBlair ignores any Q the caller passes", () => {
+        const none = computeScaledHeelanBlair(at, [deck], [hole], {});
+        const withQ = computeScaledHeelanBlair(at, [deck], [hole], { qualityFactorP: 50, qualityFactorS: 30 });
+        expect(withQ).toBeCloseTo(none, 10);
     });
 
-    it("Qs = 0 with Qp > 0 no longer annihilates the S term", () => {
-        // ⏪ BEFORE 0.3.0 both were gated on `Qp > 0`, so Qs = 0 gave
-        //    exp(−∞) = 0 and S vanished entirely.
-        const both = computeScaledHeelan(at, [deck], [hole], { qualityFactorP: 50, qualityFactorS: 30 });
-        const sOff = computeScaledHeelan(at, [deck], [hole], { qualityFactorP: 50, qualityFactorS: 0 });
-        // With Qs = 0 the S term is UNattenuated, so the result must be larger.
-        expect(sOff).toBeGreaterThan(both);
-    });
-
-    it("Q still attenuates when explicitly enabled", () => {
-        const off = computeScaledHeelan(at, [deck], [hole], {});
-        const on = computeScaledHeelan(at, [deck], [hole], { qualityFactorP: 50, qualityFactorS: 30 });
-        expect(on).toBeLessThan(off);
+    it("falls off as the site law alone, R^(−B)", () => {
+        // A single element far from a short deck approaches the point-source
+        // R^(−B) slope; check the decade 60→120 m is close to 2^(−1.6).
+        const a = computeScaledHeelan({ x: 60, y: 0, z: 0 }, [deck], [hole], {});
+        const b = computeScaledHeelan({ x: 120, y: 0, z: 0 }, [deck], [hole], {});
+        const slope = Math.log(b / a) / Math.log(2);
+        expect(slope).toBeLessThan(-1.4);
+        expect(slope).toBeGreaterThan(-1.8);
     });
 });
 
@@ -205,19 +214,20 @@ describe("§5 element summation is linear and counted from the primer", () => {
         expect(vTop).not.toBeCloseTo(vMid, 2);
     });
 
-    it("a mid-column primer reads HIGH against Blair 2008 Eq 22 — known residual", () => {
-        // The one-sided fj = |(m+½) − primerElemPos| + 1 over-counts a
-        // mid-column primer by roughly 9–13% depending on A. Kept deliberately
-        // to match Kirra and Blair's own Python; recorded here rather than
-        // silently differing. See "Known residual" in README.md.
-        const A = 0.8, N = 20, we = 1 / N;
-        let sum = 0;
-        for (let m = 0; m < N; m++) {
-            const fj = Math.abs(m + 0.5 - 0.5 * N) + 1;
-            sum += Math.pow(fj * we, A) - (fj - 1 > 0 ? Math.pow((fj - 1) * we, A) : 0);
+    it("Blair 2008 Eq 22 conserves charge for EVERY primer position", () => {
+        // ⏪ blast-physics-js 0.3.0 used a one-sided approximation that
+        //    over-counted a mid-column primer by 9–13% and under-counted an
+        //    end-primed deck by ~3%. The real Eq 22, ported from Kirra,
+        //    telescopes to M^A exactly wherever the primer sits.
+        const N = 20, M = 1, w = M / N;
+        for (const A of [0.5, 0.7, 0.8]) {
+            for (const frac of [0, 0.25, 0.5, 0.75, 1.0]) {
+                const pEl = blairPrimerElement(frac, N);
+                let sum = 0;
+                for (let m = 0; m < N; m++) sum += blairIncrement(m, N, pEl, w, A);
+                expect(sum).toBeCloseTo(Math.pow(M, A), 10);
+            }
         }
-        expect(sum).toBeGreaterThan(1.05);   // vs M^A = 1
-        expect(sum).toBeLessThan(1.15);
     });
 });
 

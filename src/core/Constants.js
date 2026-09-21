@@ -49,3 +49,10 @@ export const PULSE_PEAK_NORM = 0.0455;
  */
 export const PPV_CRITICAL_NIOSH_LOW = 700;
 export const PPV_CRITICAL_NIOSH_HIGH = 1000;
+
+/**
+ * Peak-velocity normalisation of the Blair & Minchinton n = 6 pulse:
+ * k6 = (e/6)^6 / γ6 = 0.189887. The pressure pulse peaks at Pb, and the
+ * corresponding peak particle velocity carries 1/γ6.
+ */
+export const PULSE_VELOCITY_NORM_N6 = 0.189887;

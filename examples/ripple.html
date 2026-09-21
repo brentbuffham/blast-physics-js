@@ -4,31 +4,50 @@
 <meta charset="UTF-8">
 <title>blast-physics-js — Ripple Tank, IDI / FFT and Monitor Synthesis</title>
 <style>
+	/* ── Kirra brand tokens ──────────────────────────────────────────
+	   Copied from Kirra's src/kirra.css :root, not invented here. The accent is
+	   RED, app-wide. A plausible-looking variable name is not a brand — read a
+	   token. Keep in step with kirra.css if these change there. */
+	:root {
+		--kirra-accent: #ff0000;          /* --kirra-accent / --mouseover-color */
+		--kirra-accent-press: #cc0000;    /* --click-color   */
+		--kirra-accent-soft: #ff5555;     /* --selected-color */
+		--kirra-accent-bg: var(--kirra-accent-bg);       /* red-tinted dark, for an active chip */
+		--kirra-bg: #1a1a1a;              /* --dark-mode-color  */
+		--kirra-canvas: #000000;          /* --dark-mode-canvas */
+		--kirra-text: #d9d9d9;            /* --dark-mode-text   */
+		--kirra-border: #4d4d4d;          /* --dark-mode-border */
+		--kirra-muted: #9a9a9a;           /* --light-mode-border, as a muted grey */
+		--kirra-dim: #828282;             /* --primary-color    */
+		--kirra-disabled: #736363;        /* --disabled-color   */
+		--kirra-font: Arial, Helvetica, sans-serif;
+	}
+
 	* { margin: 0; padding: 0; box-sizing: border-box; }
-	body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #d0d0d0; overflow: hidden; }
-	#nav { height: 34px; background: #0d0d0d; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 4px; padding: 0 10px; font-size: 0.74rem; }
+	body { font-family: var(--kirra-font); background: var(--kirra-bg); color: var(--kirra-text); overflow: hidden; }
+	#nav { height: 34px; background: #0d0d0d; border-bottom: 1px solid var(--kirra-border); display: flex; align-items: center; gap: 4px; padding: 0 10px; font-size: 0.74rem; }
 	#nav .brand { font-family: 'Courier New', monospace; color: #888; margin-right: 14px; white-space: nowrap; }
-	#nav .brand b { color: #cc2222; font-weight: normal; }
+	#nav .brand b { color: var(--kirra-accent); font-weight: normal; }
 	#nav a { color: #aaa; text-decoration: none; padding: 4px 10px; border-radius: 4px; border: 1px solid transparent; white-space: nowrap; }
 	#nav a:hover { color: #fff; background: #1e1e1e; border-color: #3a3a3a; }
-	#nav a.on { color: #fff; background: #2a1414; border-color: #cc2222; }
+	#nav a.on { color: #fff; background: var(--kirra-accent-bg); border-color: var(--kirra-accent); }
 	#nav .spacer { flex: 1; }
 	#app { display: flex; height: calc(100vh - 34px); }
 	#viewport { flex: 1; position: relative; background: #0b0b0e; }
 	#viewport > canvas { position: absolute; inset: 0; display: block; }
-	#info-panel { width: 330px; min-width: 300px; background: #111; border-left: 1px solid #333; padding: 10px 12px; font-size: 0.72rem; font-family: 'Courier New', monospace; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-	#info-panel h3 { color: #cc2222; font-size: 0.8rem; margin-bottom: 2px; }
+	#info-panel { width: 330px; min-width: 300px; background: #111; border-left: 1px solid var(--kirra-border); padding: 10px 12px; font-size: 0.72rem; font-family: 'Courier New', monospace; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+	#info-panel h3 { color: var(--kirra-accent); font-size: 0.8rem; margin-bottom: 2px; }
 	#info-panel .stat { color: #999; line-height: 1.6; }
-	#info-panel .stat b { color: #d0d0d0; }
-	#info-panel hr { border: none; border-top: 1px solid #333; margin: 2px 0; }
-	#info-panel a { color: #6aa0ff; }
-	.modelnote { border-left: 2px solid #3d5a80; background: #12161c; color: #90a4bd; border-radius: 3px; padding: 6px 9px; line-height: 1.55; }
-	.modelnote b { color: #b8cce4; }
+	#info-panel .stat b { color: var(--kirra-text); }
+	#info-panel hr { border: none; border-top: 1px solid var(--kirra-border); margin: 2px 0; }
+	#info-panel a { color: var(--kirra-accent-soft); }
+	.modelnote { border-left: 2px solid var(--kirra-border); background: #12161c; color: var(--kirra-muted); border-radius: 3px; padding: 6px 9px; line-height: 1.55; }
+	.modelnote b { color: var(--kirra-text); }
 	#info-panel canvas { width: 100%; height: 110px; background: #0b0b0e; border: 1px solid #2a2a2a; border-radius: 3px; display: block; }
 	#footer { position: absolute; left: 0; right: 0; bottom: 0; height: 26px; background: rgba(0,0,0,0.6); display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 0.72rem; }
-	#tprog { flex: 1; height: 8px; background: #333; border-radius: 4px; cursor: pointer; }
-	#tprog-fill { height: 100%; width: 0%; background: #cc2222; border-radius: 4px; }
-	#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #cc2222; font-size: 1.2rem; z-index: 100; }
+	#tprog { flex: 1; height: 8px; background: var(--kirra-border); border-radius: 4px; cursor: pointer; }
+	#tprog-fill { height: 100%; width: 0%; background: var(--kirra-accent); border-radius: 4px; }
+	#loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: var(--kirra-accent); font-size: 1.2rem; z-index: 100; }
 	#drop { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(204,34,34,0.25); font-size: 1.4rem; pointer-events: none; }
 </style>
 </head>

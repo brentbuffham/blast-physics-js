@@ -13,13 +13,14 @@
  *
  * so the rock enters only through the shear modulus μ. Per sub-element:
  *
- *   scale = P_b · a² · dL / (μ · Vp · R)      (shared by P and SV)
- *   vP    = scale · ω² · sfacp(φ) · att_P
- *   vSV   = scale · ω² · (α/β) · sfacs(φ) · att_S
+ *   C_elem = a² · δL · b² · P_b · k6 / (2 · μ · Vp)
+ *   vP     = (C_elem / R) · blairPatternP(φ) · att_P
+ *   vSV    = (C_elem / R) · blairPatternS(φ) · att_S     (α/β inside the pattern)
  *
- * ω is the dominant angular frequency of the radiated pulse,
- * ω = 2π · 0.0597 · b, and it appears SQUARED because far-field velocity is
- * the second time-derivative of the source moment:  v = M̈ / (4π · ρα³ · R).
+ * k6 = (e/6)^6 / γ6 = 0.189887 — the n = 6 pulse peaks at P_b, and its peak
+ * velocity carries 1/γ6. The b² is the bandwidth normalisation that makes the
+ * expression a velocity; it is NOT (2π·0.0597·b)². Q is evaluated separately,
+ * at the pulse's dominant frequency ω = 2π · 0.0597 · b.
  *
  * Summed (coherent) then converted to VPPV (mm/s).
  *
@@ -36,36 +37,26 @@
  *      ≈ 43 500 rad/s for a 115 mm hole at 5 km/s that is an order of magnitude
  *      above B&M's dominant frequency, and it is a Hz-valued quantity used
  *      where rad/s is expected, so exp(−ωR/2QV) erased the far field —
- *      attenuation of 2.4e−5 at 100 m. ω is now the dominant frequency of the
- *      n = 6 pulse, 2π · 0.0597 · b, for both uses.
- *   2b. The old expression was also DIMENSIONALLY WRONG. Pb·a²·dL/(ρVp²R)
- *      carries m², and × ω gives m²/s — not a velocity. The corrected
- *      Pb·a²·dL/(μ·Vp·R) carries m·s, and × ω² gives m/s. One factor of ω
- *      was simply missing.
+ *      attenuation of 2.4e−5 at 100 m. Q is now evaluated at the pulse's
+ *      dominant frequency, ω = 2π · 0.0597 · b, and the source amplitude is
+ *      normalised by b²·k6 instead of a bare ω.
  *   3. It used heelanF1/heelanF2, which invert P and SV relative to B&M
  *      Eqs 4–5. PPV was non-monotonic in distance as a result — it read
  *      higher at 20 m than at 10 m. Now uses blairSfacp / blairSfacs, with
  *      the α/β factor on SV (Eq 11).
  *
- * ⚠ OPEN — READ BEFORE USING THIS MODEL QUANTITATIVELY. Eq 6's full constant
- *   is w_e·b^(2−n)·P_o / (2π·ρ_e·μ·α). The b^(2−n) bandwidth normalisation
- *   is NOT reproduced here, and ω² stands in for the pulse's exact second
- *   derivative. The form above is dimensionally correct and its ratios and
- *   spatial shape follow the paper, but the ABSOLUTE level is uncalibrated —
- *   it currently reads about 2–3× a fitted site law beyond 20 m.
- *   Use ScaledHeelan or BlairMinchinton for quantitative work.
- *
- *   This also means HeelanOriginal now DIFFERS FROM KIRRA, which kept
- *   ω = VOD/(2a) on the source term and corrected only the Q frequency.
- *   The ω² here follows from the dimensional check above; the two codebases
- *   need reconciling before either is trusted for absolute numbers.
+ * ⚠ B&M p4: the unscaled model "can only be used to predict normalised
+ *   vibration values", because the true borehole wall load P_o is unknown.
+ *   P_b = ρ_e·VOD²/8 is an ASSUMPTION, so the absolute mm/s here is indicative;
+ *   the SHAPE is the published one. Use ScaledHeelan or BlairMinchinton when
+ *   you need calibrated numbers.
  *
  * Extracted from Kirra's HeelanOriginalModel.js GLSL fragment shader.
  * Reference: Blair & Minchinton (2006), Fragblast-8, Eqs 4–6 and 11.
  */
 
-import { blairSfacp, blairSfacs } from "../core/RadiationPattern.js";
-import { DEFAULT_VOD, PULSE_DOMINANT_FREQ_COEFF } from "../core/Constants.js";
+import { blairPatternP, blairPatternS } from "../core/BlairScaledHeelan.js";
+import { DEFAULT_VOD, PULSE_DOMINANT_FREQ_COEFF, PULSE_VELOCITY_NORM_N6 } from "../core/Constants.js";
 
 /**
  * Compute Heelan Original VPPV at an observation point.
@@ -80,10 +71,9 @@ import { DEFAULT_VOD, PULSE_DOMINANT_FREQ_COEFF } from "../core/Constants.js";
  * @param {number} [params.detonationVelocity=5000] - m/s fallback VOD
  * @param {number} [params.elemsPerDeck=8]
  * @param {number} [params.cutoffDistance=0.5]
- * @param {number} [params.bandwidth=10000]        - b, sets the dominant
- *                 frequency ω = 2π · 0.0597 · b used for BOTH the source term
- *                 and Q. Amplitude scales as ω², so this is the single most
- *                 sensitive parameter in this model.
+ * @param {number} [params.bandwidth=10000]        - b. Amplitude scales as b²
+ *                 and Q is evaluated at 2π·0.0597·b, so this is the single
+ *                 most sensitive parameter in this model.
  * @param {number} [params.qualityFactorP=50]      - 0 disables P attenuation.
  *                 Unlike the scaled models, Q belongs here: this model has no
  *                 site law carrying the material attenuation.
@@ -103,16 +93,14 @@ export function computeHeelanOriginal(point, deckEntries, holeEntries, params) {
 
     var VP = p.pWaveVelocity, VS = p.sWaveVelocity;
     var rho = p.rockDensity;
-    var vsp = (VS * VS) / (VP * VP);
-    var VPoverVS = VP / VS;
+    var vsOverVp = VS / Math.max(VP, 1.0);
     var mu = rho * VS * VS;              // shear modulus — B&M Eq 6
     var cutoff = p.cutoffDistance;
     var Qp = p.qualityFactorP, Qs = p.qualityFactorS;
     var elemsPerDeck = p.elemsPerDeck;
-    // Dominant angular frequency of the n = 6 pulse (rad/s). Drives both the
-    // source second-derivative (ω²) and the Q attenuation.
+    // Viscoelastic attenuation at the pulse's dominant frequency,
+    // f_A = 0.0597·b (B&M 2006 p8) → ω = 2π·0.0597·b.
     var omega = 2.0 * Math.PI * PULSE_DOMINANT_FREQ_COEFF * p.bandwidth;
-    var omega2 = omega * omega;
 
     var peakVPPV = 0.0;
 
@@ -147,6 +135,11 @@ export function computeHeelanOriginal(point, deckEntries, holeEntries, params) {
 
         var dL = deckLen / elemsPerDeck;
 
+        // B&M 2006 Eq 6: ONE constant for P and SV, μ = ρ·Vs².
+        // k6 = (e/6)^6 / γ6 = 0.189887 (pulse peaks at Pb; velocity peak 1/γ6).
+        var Celem = holeRadius * holeRadius * dL * p.bandwidth * p.bandwidth
+                    * Pb * PULSE_VELOCITY_NORM_N6 / (2.0 * mu * VP);
+
         var sumVr = 0.0, sumVz = 0.0;
 
         for (var m = 0; m < elemsPerDeck; m++) {
@@ -163,18 +156,15 @@ export function computeHeelanOriginal(point, deckEntries, holeEntries, params) {
             cosPhi = Math.max(-1.0, Math.min(1.0, cosPhi));
             var sinPhi = Math.sqrt(Math.max(0.0, 1.0 - cosPhi * cosPhi));
 
-            var sfacp = blairSfacp(cosPhi, vsp);
-            var sfacs = blairSfacs(sinPhi, cosPhi, sfacp);
-
-            // ONE constant for both waves — the rock enters only through μ.
-            var scale = (Pb * holeRadius * holeRadius * dL) / (mu * VP * R);
+            var f1 = blairPatternP(cosPhi, vsOverVp);
+            var f2 = blairPatternS(sinPhi, cosPhi, vsOverVp);  // includes Vp/Vs
 
             var attP = 1.0, attS = 1.0;
             if (Qp > 0) attP = Math.exp(-omega * R / (2.0 * Qp * VP));
             if (Qs > 0) attS = Math.exp(-omega * R / (2.0 * Qs * VS));
 
-            var vP  = scale * omega2 * sfacp * attP;
-            var vSV = scale * omega2 * VPoverVS * sfacs * attS;   // α/β — Eq 11
+            var vP  = (Celem / R) * f1 * attP;
+            var vSV = (Celem / R) * f2 * attS;
 
             sumVr += vP * sinPhi + vSV * cosPhi;
             sumVz += vP * cosPhi - vSV * sinPhi;

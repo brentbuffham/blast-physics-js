@@ -364,8 +364,10 @@ blast-physics-js/
 ## Breaking changes in 0.3.0
 
 Every item here is a place where the code and the published equation disagreed.
-Each source file carries a `⏪ BEFORE 0.3.0` block with the old expression, so a
-result computed with 0.2.x can still be explained.
+The corrected models are ported from **Kirra's shader implementations, which are
+the reference** — `src/core/BlairScaledHeelan.js` is a 1:1 port of Kirra's file of
+the same name, so the GPU and CPU paths cannot drift. Each source file keeps a
+`⏪ BEFORE 0.3.0` block with the old expression.
 
 **Sources.** Blair & Minchinton (2006) Fragblast-8; Blair (2008) IJRMMS 45;
 Blair (2010) Fragblast-9; Blair & Armstrong (1999) Fragblast 3;
@@ -375,28 +377,23 @@ NIOSH (Iverson, Kerkering & Hustrulid 2008); Onederra & Esen (2004).
 |---|---|---|
 | 1 | **Holmberg-Persson sums first, then raises to α once** (`PPV = K·[Σ w·R^(−β/α)]^α`). The old form raised each element to α and RMS-summed, which never converged. | ~34 % higher at 8 elements, and the answer no longer depends on `elemsPerDeck`. Pinned by the NIOSH worked example: a 3 m column at 1 kg/m, 2 m away at mid-column height → **476 mm/s**. |
 | 2 | **`computeHolmbergPerssonDamage` returns PPV in mm/s**, not `peakPPV / ppvCritical`. `ppvCritical` is no longer a parameter. | Divide by your own threshold to recover the old ratio. `computeGrid` now reports `unit: "mm/s"`. |
-| 3 | **`ScaledHeelan` and `HeelanOriginal` use the Blair patterns** (`blairSfacp` / `blairSfacs`), not `heelanF1` / `heelanF2`. The old pair put P at zero and |SV| at maximum at φ = π/2, the reverse of B&M Eqs 4–5. | PPV was non-monotonic in distance — it read higher at 20 m than at 10 m. `heelanF1`/`heelanF2` are still exported but no model uses them. |
-| 4 | **`ScaledHeelanBlair` applies the α/β = Vp/Vs factor on SV** (B&M Eq 11), as `BlairMinchinton` always did. | S was under-weighted by ≈ 1.73. |
-| 5 | **The mass exponent A is derived as `chargeExponent × B`**, not taken as `chargeExponent`. Blair 2008 Eq 14: `a·(√W/d)^b ≡ K·W^A·d^(−B)`, so A = e·B — 0.8 for the default B = 1.6, not 0.5. | ~3.3× higher for an 80 kg deck. `chargeExponent` keeps its scaled-distance meaning (the `e` in `D/W^e`), which is what `SiteLaw.js` and `PPV.js` have always meant by it. Pass `massExponent` to set A directly. |
-| 6 | **Q attenuation is OFF by default on the scaled models** (`qualityFactorP`/`S` default to 0). The `R^(−(B−1))` in the site law already IS the material attenuation (B&M p5). | Higher in the far field. Enabling Q double-counts; it is honoured for experimentation only. Q still applies to `HeelanOriginal`, which has no site law. |
-| 7 | **Qp and Qs gate independently.** Previously both were gated on `Qp > 0`, so `Qs = 0` with `Qp > 0` gave `exp(−∞) = 0` and an S term that vanished silently. | Affects anyone who set `Qs: 0`. |
-| 8 | **Elements sum linearly, not RMS**, and are counted from the primer, so `ScaledHeelan` now honours `primerFraction` (it ignored it entirely). | The sum telescopes to `M^A` and conserves charge (Blair 2008 p237). |
-| 9 | **`HeelanOriginal` shares one constant between P and SV**, with μ = ρ·Vs² (B&M Eq 6) — the rock enters only through the shear modulus — and evaluates ω at the dominant frequency of the n = 6 pulse, `2π·0.0597·b`, rather than `VOD/(2a)`. | Very large. The old form was dimensionally wrong (m²/s, not m/s) and its ω erased the far field — attenuation of 2.4e−5 at 100 m. See the ⚠ OPEN note in the source: the absolute level is still uncalibrated. |
-| 10 | **Element mass comes from the deck's own `mass`** in `BlairMinchinton` and `BlairHeavyWorker`, not from `ρₑ·π·RAD²·dL` built on the HOLE radius. | A decoupled deck was overweighted by `(holeDiam/chargeDiam)²` — about 2× at the `DECOUPLED` default. |
-| 11 | **One named VOD fallback**, `DEFAULT_VOD = 5000`, exported from `core/Constants.js`. | Was 5000, 5279 and 5500 in three different files. |
-| 12 | **An explicit `0` is no longer replaced by the default** in `createDeckEntry` or in `BlairHeavyWorker`'s parameter reads. | `Number(x || default)` treated a legitimate zero as missing. |
+| 3 | **All models use the Blair patterns** — `blairPatternP` (Eq 10) and `blairPatternS` (Eq 11, with α/β folded in). `heelanF1`/`heelanF2` put P at zero and |SV| at maximum at φ = π/2, the reverse of the paper. | PPV was non-monotonic in distance — it read higher at 20 m than at 10 m. The old pair is still exported, marked as the pre-2026 pattern; nothing uses it. |
+| 4 | **Blair 2008 Eq 22 replaces the one-sided primer approximation.** The front leaves the primer in both directions, so paired elements share one increment until the shorter side runs out. | Telescopes to `M^A` **exactly, for any primer position**, so the result is independent of `elemsPerDeck` to within rounding. `ScaledHeelan` previously ignored `primerFraction` entirely. |
+| 5 | **`chargeExponent` is Blair's A and now defaults to 0.8**, matching Kirra. For a square-root site law, Blair 2008 Eq 14 gives A = B/2. | ~3.3× higher for an 80 kg deck. ⚠ **Name collision:** `SiteLaw.js` and `PPV.js` use the same name for the scaled-distance `e`, where 0.5 IS correct. The two are related by A = e·B. Check which you are passing. |
+| 6 | **Q attenuation is GONE from both scaled models.** The `R^(−(B−1))` in the site law already IS the material attenuation (B&M p5). `qualityFactorP`/`S` are accepted and ignored. | Higher in the far field. Q still applies to `HeelanOriginal`, which has no site law to carry it. |
+| 7 | **Elements sum linearly** over per-element resultants, `Σ sqrt(vP² + vSV²)`, not `sqrt(Σ (vP² + vSV²))`. | Conserves charge (Blair 2008 p237). With item 4, `elemsPerDeck` now moves the answer by < 0.1 % from 4 to 32 elements. |
+| 8 | **`HeelanOriginal` rebuilt on B&M Eq 6**: one constant for P and SV, `C = a²·δL·b²·P_b·k6 / (2·μ·Vp)` with μ = ρ·Vs² and k6 = (e/6)⁶/γ6 = 0.189887. Q is evaluated at the pulse's dominant frequency, 2π·0.0597·b, not `VOD/(2a)`. | Very large. The old form used two different denominators, and its ω erased the far field — attenuation of 2.4e−5 at 100 m. It read 26 m/s at 5 m and 0.47 mm/s at 50 m; it now tracks a fitted site law within about 1.4–1.8×. |
+| 9 | **Element mass comes from the deck's own `mass`** in `BlairMinchinton` and `BlairHeavyWorker`, not from `ρₑ·π·RAD²·dL` built on the HOLE radius. | A decoupled deck was overweighted by `(holeDiam/chargeDiam)²` — about 2× at the `DECOUPLED` default. |
+| 10 | **One named VOD fallback**, `DEFAULT_VOD = 5000`, exported from `core/Constants.js`. | Was 5000, 5279 and 5500 in three different files. |
+| 11 | **An explicit `0` is no longer replaced by the default** in `createDeckEntry` or in `BlairHeavyWorker`'s parameter reads. | `Number(x || default)` treated a legitimate zero as missing. |
 
-### Known residual
+### Still uncalibrated
 
-The primer-ordering term `f_j = |(m + ½) − primerElemPos| + 1` is one-sided, and
-over-counts a mid-column primer against Blair 2008 Eq 22 by roughly 9–13 %
-(A-dependent), while under-counting an end-primed deck by about 3 %. This is
-kept deliberately, to match Kirra and Blair's own Python, and is pinned by a
-test rather than left undocumented.
-
-`HeelanOriginal` currently differs from Kirra: the ω² in its source term follows
-from a dimensional check that Kirra has not applied. Treat that model as
-qualitative until the two are reconciled.
+B&M p4 is explicit that the unscaled model "can only be used to predict
+normalised vibration values", because the true borehole wall load `P_o` is
+unknown. `HeelanOriginal` assumes `P_b = ρₑ·VOD²/8`, so its absolute mm/s is
+indicative and its SHAPE is the published one. Use `ScaledHeelan`,
+`ScaledHeelanBlair` or `BlairMinchinton` when you need calibrated numbers.
 
 
 ## Implementation Roadmap

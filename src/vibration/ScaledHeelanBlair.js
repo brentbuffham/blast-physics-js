@@ -18,12 +18,15 @@
  *   1. The α/β = Vp/Vs factor on the SV term (B&M Eq 11) was missing, so S
  *      was under-weighted by a factor of about 1.73 relative to
  *      BlairMinchinton.js, which has always applied it.
- *   2. `chargeExponent: 0.5` was used directly as the mass exponent A, where
- *      the site law gives A = e·B = 0.8 for B = 1.6. See `massExponent`.
+ *   2. `chargeExponent` defaulted to 0.5, the scaled-distance value, where
+ *      Blair's A is B/2 = 0.8 for B = 1.6 (Blair 2008 Eq 14).
  *   3. Elements were RMS-summed, making the result depend on `elemsPerDeck`.
- *      The linear sum telescopes and conserves charge (Blair 2008 p237).
- *
- *   Q attenuation is also off by default — see `qualityFactorP`.
+ *      The sum is now linear over per-element resultants, and the Eq 22
+ *      increment telescopes to M^A exactly for any primer position.
+ *   4. The one-sided primer approximation has been replaced by the real
+ *      Blair 2008 Eq 22 (see core/BlairScaledHeelan.js).
+ *   5. Q attenuation is GONE: the site law's R^−(B−1) already carries the
+ *      material attenuation (B&M p5), so applying Q on top double-counts.
  *
  * Extracted from Kirra's ScaledHeelanNinetyPCTModel.js GLSL fragment shader.
  * Reference: Blair (2015), Fragblast 11; Blair & Minchinton (2006), Fragblast-8;
@@ -32,7 +35,7 @@
 
 import { blairSfacp, blairSfacs } from "../core/RadiationPattern.js";
 import { deriveSWaveVelocity } from "../core/RockMass.js";
-import { PULSE_DOMINANT_FREQ_COEFF } from "../core/Constants.js";
+import { blairIncrement, blairPrimerElement } from "../core/BlairScaledHeelan.js";
 
 /**
  * Compute Blair Lite PPV at an observation point.
@@ -43,47 +46,35 @@ import { PULSE_DOMINANT_FREQ_COEFF } from "../core/Constants.js";
  * @param {Object} params
  * @param {number} [params.K=1140]
  * @param {number} [params.B=1.6]
- * @param {number} [params.chargeExponent=0.5] - e, the scaled-distance exponent
- *                 in D/W^e. The mass exponent A is derived as e·B unless
- *                 `massExponent` is given.
- * @param {number} [params.massExponent]       - A, overriding e·B.
+ * @param {number} [params.chargeExponent=0.8] - A, the CHARGE MASS exponent.
+ *                 A = B/2 for a square-root site law (Blair 2008 Eq 14). NOT
+ *                 the scaled-distance `e` that SiteLaw.js means by this name.
  * @param {number} [params.elemsPerDeck=20]
  * @param {number} [params.pWaveVelocity=4500]
  * @param {number} [params.poissonRatio=0.25]
  * @param {number} [params.pWaveWeight=1.0]
  * @param {number} [params.svWaveWeight=1.0]
  * @param {number} [params.cutoffDistance=0.5]
- * @param {number} [params.qualityFactorP=0]   - 0 = OFF (the default, and correct).
- *                 The R^(−(B−1)) in the site law already IS the material
- *                 attenuation (B&M p5); exp(−ωR/2QV) on top double-counts it.
- * @param {number} [params.qualityFactorS=0]   - 0 = OFF. Independent of Qp.
- * @param {number} [params.bandwidth=10000]    - only used when Q is enabled
  * @returns {number} VPPV (mm/s)
  */
 export function computeScaledHeelanBlair(point, deckEntries, holeEntries, params) {
     var p = Object.assign({
-        K: 1140, B: 1.6, chargeExponent: 0.5,
+        K: 1140, B: 1.6, chargeExponent: 0.8,
         elemsPerDeck: 20,
         pWaveVelocity: 4500, poissonRatio: 0.25,
         pWaveWeight: 1.0, svWaveWeight: 1.0,
-        cutoffDistance: 0.5,
-        qualityFactorP: 0, qualityFactorS: 0,
-        bandwidth: 10000
+        cutoffDistance: 0.5
     }, params || {});
 
     var VS = deriveSWaveVelocity(p.pWaveVelocity, p.poissonRatio);
     var VP = p.pWaveVelocity;
     var vsp = (VS * VS) / (VP * VP);
 
-    var K = p.K, B = p.B;
-    // A = e·B (Blair 2008 Eq 14 p241: a·(√W/d)^b ≡ K·W^A·d^(−B), so A = b/2 for e = ½)
-    var A = (p.massExponent != null) ? p.massExponent : p.chargeExponent * B;
+    var K = p.K, B = p.B, A = p.chargeExponent;
     var VPoverVS = VP / VS;
     var pW = p.pWaveWeight, sW = p.svWaveWeight;
     var cutoff = p.cutoffDistance;
-    var Qp = p.qualityFactorP, Qs = p.qualityFactorS;
     var elemsPerDeck = p.elemsPerDeck;
-    var omega = 2.0 * Math.PI * PULSE_DOMINANT_FREQ_COEFF * p.bandwidth;
 
     var peakVPPV = 0.0;
 
@@ -114,10 +105,9 @@ export function computeScaledHeelanBlair(point, deckEntries, holeEntries, params
         var dL = deckLen / elemsPerDeck;
         var elementMass = dk.mass / elemsPerDeck;
 
-        // Primer element position (fractional index within deck)
-        var primerElemPos = dk.primerFraction * elemsPerDeck;
+        var primerElem = blairPrimerElement(dk.primerFraction, elemsPerDeck);
 
-        var sumP = 0.0, sumSV = 0.0;
+        var sumPeak = 0.0;
 
         for (var m = 0; m < elemsPerDeck; m++) {
             var elemOffset = (m + 0.5) * dL;
@@ -134,26 +124,21 @@ export function computeScaledHeelanBlair(point, deckEntries, holeEntries, params
             cosPhi = Math.max(-1.0, Math.min(1.0, cosPhi));
             var sinPhi = Math.sqrt(Math.max(0.0, 1.0 - cosPhi * cosPhi));
 
-            // Primer-aware Em ordering (Blair 2008)
-            var fj = Math.abs((m + 0.5) - primerElemPos) + 1.0;
-            var fjwe  = fj * elementMass;
-            var fj1we = (fj - 1.0) * elementMass;
-            var Em = Math.pow(fjwe, A) - (fj1we > 0 ? Math.pow(fj1we, A) : 0.0);
-
+            // Blair 2008 Eq 22 element weight
+            var Em = blairIncrement(m, elemsPerDeck, primerElem, elementMass, A);
             var vppvElem = K * Em * Math.pow(R, -B);
 
-            // Blair radiation patterns
-            var sfacp = blairSfacp(cosPhi, vsp);
+            // Blair radiation patterns, with the near-axial fud = 1.2
+            // regularisation that distinguishes this model from ScaledHeelan.
+            var sfacp = Math.abs(blairSfacp(cosPhi, vsp));
             var sfacs = blairSfacs(sinPhi, cosPhi, sfacp);
 
-            // ⏪ BEFORE 0.3.0 both attenuations were gated on `Qp > 0`, so
-            //    Qs = 0 with Qp > 0 gave exp(−∞) = 0 and an S term that vanished.
-            var attP = 1.0, attS = 1.0;
-            if (Qp > 0) attP = Math.exp(-omega * R / (2.0 * Qp * VP));
-            if (Qs > 0) attS = Math.exp(-omega * R / (2.0 * Qs * VS));
+            // No Q: the site law's R^−(B−1) IS the attenuation (B&M p5).
+            // S carries B&M Eq 11's (Vp/Vs) factor.
+            var vP  = vppvElem * sfacp * pW;
+            var vSV = VPoverVS * vppvElem * sfacs * sW;
 
-            sumP  += vppvElem * sfacp * pW * attP;
-            sumSV += VPoverVS * vppvElem * sfacs * sW * attS;  // α/β on SV — B&M Eq 11
+            sumPeak += Math.sqrt(vP * vP + vSV * vSV);
         }
 
         // Attenuate below the toe
@@ -161,13 +146,10 @@ export function computeScaledHeelanBlair(point, deckEntries, holeEntries, params
         var belowToe = projOnAxis - holeLen;
         if (belowToe > 0) {
             var decayLen = Math.max(deckLen * 0.15, holeRadius * 4.0);
-            var att = Math.exp(-belowToe / decayLen);
-            sumP *= att;
-            sumSV *= att;
+            sumPeak *= Math.exp(-belowToe / decayLen);
         }
 
-        var vppv = Math.sqrt(sumP * sumP + sumSV * sumSV);
-        if (vppv > peakVPPV) peakVPPV = vppv;
+        if (sumPeak > peakVPPV) peakVPPV = sumPeak;
     }
 
     return peakVPPV;
@@ -176,13 +158,11 @@ export function computeScaledHeelanBlair(point, deckEntries, holeEntries, params
 export class ScaledHeelanBlairModel {
     constructor(params) {
         this.params = Object.assign({
-            K: 1140, B: 1.6, chargeExponent: 0.5,
+            K: 1140, B: 1.6, chargeExponent: 0.8,
             elemsPerDeck: 20,
             pWaveVelocity: 4500, poissonRatio: 0.25,
             pWaveWeight: 1.0, svWaveWeight: 1.0,
-            cutoffDistance: 0.5,
-            qualityFactorP: 0, qualityFactorS: 0,
-            bandwidth: 10000
+            cutoffDistance: 0.5
         }, params || {});
     }
 
