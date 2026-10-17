@@ -14,6 +14,8 @@
  * Extracted from Kirra's JointedRockDamageModel.js GLSL fragment shader.
  */
 
+import { holmbergPerssonChargeSums } from "./HolmbergPerssonDamage.js";
+
 /**
  * Compute jointed rock damage ratio at an observation point.
  *
@@ -42,46 +44,22 @@ export function computeJointedRockDamage(point, deckEntries, params) {
         elemsPerDeck: 8, cutoffDistance: 0.3
     }, params || {});
 
-    var K = p.K_hp, alpha = p.alpha_hp, beta = p.beta_hp;
-    var betaOverAlpha = beta / alpha;
-    var cutoff = p.cutoffDistance;
-    var elemsPerDeck = p.elemsPerDeck;
+    var K = p.K_hp, alpha = p.alpha_hp;
 
     var jointAngleRad = p.jointSetAngle * Math.PI / 180.0;
     var frictionCoeff = Math.tan(p.jointFrictionAngle * Math.PI / 180.0);
 
     var peakDamageRatio = 0.0;
 
-    for (var d = 0; d < deckEntries.length; d++) {
-        var dk = deckEntries[d];
-        if (dk.mass <= 0) continue;
+    // Σ w_i · R_i^(−β/α) per CHARGE — the decks of one hole that fire together
+    // share one sum (core/ChargeColumns.js), raised to α once. See HolmbergPerssonDamage.
+    // ⏪ BEFORE 0.3.0: var ppv_i = K*pow(q,alpha)/pow(R,beta); sumPPV2 += ppv_i*ppv_i;
+    //    then ppv = sqrt(sumPPV2) — element-count dependent, never converged.
+    // ⏪ BEFORE 0.3.2: one sum per deck, so a split column read low.
+    var sums = holmbergPerssonChargeSums(point, deckEntries, p);
 
-        var topX = dk.topX, topY = dk.topY, topZ = dk.topZ;
-        var botX = dk.baseX, botY = dk.baseY, botZ = dk.baseZ;
-        var axX = botX - topX, axY = botY - topY, axZ = botZ - topZ;
-        var deckLen = Math.sqrt(axX * axX + axY * axY + axZ * axZ);
-        if (deckLen < 0.001) continue;
-        var dirX = axX / deckLen, dirY = axY / deckLen, dirZ = axZ / deckLen;
-
-        var dL = deckLen / elemsPerDeck;
-        var linearDensity = dk.mass / deckLen;
-        var q = linearDensity * dL;
-
-        // Σ w_i · R_i^(−β/α), then raised to α once — see HolmbergPersson.
-        // ⏪ BEFORE 0.3.0: var ppv_i = K*pow(q,alpha)/pow(R,beta); sumPPV2 += ppv_i*ppv_i;
-        //    then ppv = sqrt(sumPPV2) — element-count dependent, never converged.
-        var sumGeom = 0.0;
-        for (var m = 0; m < elemsPerDeck; m++) {
-            var elemOffset = (m + 0.5) * dL;
-            var eX = topX + dirX * elemOffset;
-            var eY = topY + dirY * elemOffset;
-            var eZ = topZ + dirZ * elemOffset;
-            var dx = point.x - eX, dy = point.y - eY, dz = point.z - eZ;
-            var R = Math.max(Math.sqrt(dx * dx + dy * dy + dz * dz), cutoff);
-            sumGeom += q * Math.pow(R, -betaOverAlpha);
-        }
-
-        var ppv = K * Math.pow(sumGeom, alpha);  // mm/s
+    for (var d = 0; d < sums.length; d++) {
+        var ppv = K * Math.pow(sums[d], alpha);  // mm/s
 
         // Convert PPV (mm/s) to dynamic stress (MPa)
         // σ_d = ρ × Vp × PPV × 1e-3 / 1e6 = ρ × Vp × PPV × 1e-9

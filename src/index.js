@@ -45,7 +45,8 @@ export { blairPatternP, blairPatternS, blairIncrement, blairPrimerElement } from
 export { DEFAULT_VOD, DEFAULT_EXPLOSIVE_DENSITY, DEFAULT_HOLE_DIAM_MM,
          PULSE_DOMINANT_FREQ_COEFF, PULSE_PEAK_NORM, PULSE_VELOCITY_NORM_N6,
          PPV_CRITICAL_NIOSH_LOW, PPV_CRITICAL_NIOSH_HIGH } from "./core/Constants.js";
-export { computeHolmbergPerssonDamage, HolmbergPerssonDamageModel } from "./damage/HolmbergPerssonDamage.js";
+export { computeHolmbergPerssonDamage, holmbergPerssonChargeSums, HolmbergPerssonDamageModel } from "./damage/HolmbergPerssonDamage.js";
+export { inheritColumnFireTimes, sameFireTime, COLUMN_JOIN_M, SAME_FIRE_MS } from "./core/ChargeColumns.js";
 export { computeJointedRockDamage, JointedRockDamageModel } from "./damage/JointedRockDamage.js";
 
 // Pressure / energy models

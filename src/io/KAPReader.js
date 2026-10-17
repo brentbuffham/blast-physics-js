@@ -32,6 +32,7 @@
 import { readZipDirectory, zipExtract, zipExtractJSON } from "./ZipReader.js";
 import { createHoleEntry } from "../core/HoleEntry.js";
 import { createDeckEntry } from "../core/DeckEntry.js";
+import { inheritColumnFireTimes } from "../core/ChargeColumns.js";
 
 var NON_FIRING = { SurfaceConnector: true, SurfaceWire: true, SurfaceCord: true };
 var CASCADE = { ShockTube: true, Electric: true, DetonatingCord: true };
@@ -244,6 +245,7 @@ export function parseKAPObjects(data, opts) {
         }
         entry.firstFireMs = earliestHole < Infinity ? earliestHole : holeTime;
 
+        var holeDecks = [];   // this hole's explosive decks, pushed after the column pass
         for (var di = 0; di < rec.decks.length; di++) {
             var dk = rec.decks[di];
             if (!dk) continue;
@@ -269,7 +271,7 @@ export function parseKAPObjects(data, opts) {
             } else if (earliestHole < Infinity) {
                 timingMs = earliestHole;
             }
-            decks.push(createDeckEntry({
+            holeDecks.push({ top: top, base: base, primed: prims.length > 0, timingMs: timingMs, params: {
                 deckType: dk.deckType,
                 topX: entry.collarX + ux * top, topY: entry.collarY + uy * top, topZ: entry.collarZ + uz * top,
                 baseX: entry.collarX + ux * base, baseY: entry.collarY + uy * base, baseZ: entry.collarZ + uz * base,
@@ -277,8 +279,15 @@ export function parseKAPObjects(data, opts) {
                 productName: (dk.product && dk.product.name) || "",
                 holeDiamMm: diamMm,
                 chargeDiamMm: dk.deckType === "DECOUPLED" && dk.product && dk.product.diameterMm > 0 ? dk.product.diameterMm : diamMm,
-                timingMs: timingMs, holeIndex: holeIndex, primerFraction: primerFrac
-            }));
+                holeIndex: holeIndex, primerFraction: primerFrac
+            } });
+        }
+        // A deck with no primer of its own fires with the primed deck it touches —
+        // one column (core/ChargeColumns.js). Otherwise it keeps the hole's first fire.
+        inheritColumnFireTimes(holeDecks);
+        for (var hd = 0; hd < holeDecks.length; hd++) {
+            holeDecks[hd].params.timingMs = holeDecks[hd].timingMs;
+            decks.push(createDeckEntry(holeDecks[hd].params));
         }
     }
 
