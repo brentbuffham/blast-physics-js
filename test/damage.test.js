@@ -57,9 +57,13 @@ describe("computeHolmbergPerssonDamage — returns PPV in mm/s", () => {
  * α ONCE. The pre-0.3.0 form raised each element to α and RMS-summed, which
  * never converged — these tests are the whole point of that change.
  *
- * Worked example: NIOSH (Iverson, Kerkering & Hustrulid 2008) Eqs 5–6 — a 3 m
- * column at 1 kg/m, receiver 2 m away at mid-column height, K 700, α 0.7,
- * β 1.5 → 476 mm/s.
+ * Geometry: NIOSH (Iverson, Kerkering & Hustrulid 2008) — a 3 m column at 1 kg/m,
+ * receiver 2 m away at mid-column height, K 700, α 0.7, β 1.5.
+ *   - the original 1979 integral (their eq 5)        → 476 mm/s
+ *   - NIOSH-modified, K·Q^α / R̄^β (their eq 8, the
+ *     paper's worked example, R̄ = 2.174 m)            → 471 mm/s
+ * ⏪ Before 0.3.2 this called 476 "the NIOSH worked example". It is not — NIOSH's
+ * own answer is 471, from the average-distance method.
  */
 describe("Holmberg-Persson — published form (NIOSH worked example)", () => {
     const column = createDeckEntry({
@@ -71,11 +75,23 @@ describe("Holmberg-Persson — published form (NIOSH worked example)", () => {
     });
     // Receiver 2 m away, level with the middle of the column.
     const at = { x: 2, y: 0, z: -1.5 };
-    const P = { K_hp: 700, alpha_hp: 0.7, beta_hp: 1.5, cutoffDistance: 0.01 };
+    const P = { K_hp: 700, alpha_hp: 0.7, beta_hp: 1.5, cutoffDistance: 0.01, useNioshModified: false };
 
-    it("gives 476 mm/s", () => {
+    it("the original 1979 integral gives 476 mm/s", () => {
         const ppv = computeHolmbergPerssonDamage(at, [column], { ...P, elemsPerDeck: 8 });
         expect(Math.abs(ppv - 476) / 476).toBeLessThan(0.005);
+    });
+
+    it("NIOSH-modified (the default) reproduces the paper's worked example: 471 mm/s", () => {
+        const ppv = computeHolmbergPerssonDamage(at, [column], { K_hp: 700, alpha_hp: 0.7, beta_hp: 1.5, elemsPerDeck: 64 });
+        expect(Math.abs(ppv - 471) / 471).toBeLessThan(0.005);
+    });
+
+    it("NIOSH and 1979 agree far away; NIOSH reads lower close to the charge", () => {
+        const N = { ...P, elemsPerDeck: 64, useNioshModified: true }, O = { ...P, elemsPerDeck: 64 };
+        const far = { x: 30, y: 0, z: -1.5 }, near = { x: 0.3, y: 0, z: -1.5 };
+        expect(computeHolmbergPerssonDamage(far, [column], N) / computeHolmbergPerssonDamage(far, [column], O)).toBeCloseTo(1, 2);
+        expect(computeHolmbergPerssonDamage(near, [column], N)).toBeLessThan(computeHolmbergPerssonDamage(near, [column], O));
     });
 
     it("converges: 8 and 64 elements agree to better than 1%", () => {

@@ -14,7 +14,7 @@
  * Extracted from Kirra's JointedRockDamageModel.js GLSL fragment shader.
  */
 
-import { holmbergPerssonChargeSums } from "./HolmbergPerssonDamage.js";
+import { holmbergPerssonChargeSums, holmbergPerssonChargePPV } from "./HolmbergPerssonDamage.js";
 
 /**
  * Compute jointed rock damage ratio at an observation point.
@@ -33,6 +33,7 @@ import { holmbergPerssonChargeSums } from "./HolmbergPerssonDamage.js";
  * @param {number} [params.jointFrictionAngle=30]     - degrees
  * @param {number} [params.elemsPerDeck=8]
  * @param {number} [params.cutoffDistance=0.3]
+ * @param {boolean} [params.useNioshModified=true] - false = original 1979 H-P integral
  * @returns {number} Damage ratio (>1 = failure)
  */
 export function computeJointedRockDamage(point, deckEntries, params) {
@@ -41,10 +42,8 @@ export function computeJointedRockDamage(point, deckEntries, params) {
         rockTensileStrength: 10,
         rockDensity: 2700, pWaveVelocity: 4500,
         jointSetAngle: 45, jointCohesion: 0.1, jointFrictionAngle: 30,
-        elemsPerDeck: 8, cutoffDistance: 0.3
+        elemsPerDeck: 8, cutoffDistance: 0.3, useNioshModified: true
     }, params || {});
-
-    var K = p.K_hp, alpha = p.alpha_hp;
 
     var jointAngleRad = p.jointSetAngle * Math.PI / 180.0;
     var frictionCoeff = Math.tan(p.jointFrictionAngle * Math.PI / 180.0);
@@ -56,10 +55,10 @@ export function computeJointedRockDamage(point, deckEntries, params) {
     // ⏪ BEFORE 0.3.0: var ppv_i = K*pow(q,alpha)/pow(R,beta); sumPPV2 += ppv_i*ppv_i;
     //    then ppv = sqrt(sumPPV2) — element-count dependent, never converged.
     // ⏪ BEFORE 0.3.2: one sum per deck, so a split column read low.
-    var sums = holmbergPerssonChargeSums(point, deckEntries, p);
+    var charges = holmbergPerssonChargeSums(point, deckEntries, p);
 
-    for (var d = 0; d < sums.length; d++) {
-        var ppv = K * Math.pow(sums[d], alpha);  // mm/s
+    for (var d = 0; d < charges.length; d++) {
+        var ppv = holmbergPerssonChargePPV(charges[d], p);  // mm/s (NIOSH-modified unless useNioshModified: false)
 
         // Convert PPV (mm/s) to dynamic stress (MPa)
         // σ_d = ρ × Vp × PPV × 1e-3 / 1e6 = ρ × Vp × PPV × 1e-9
@@ -90,7 +89,7 @@ export class JointedRockDamageModel {
             rockTensileStrength: 10,
             rockDensity: 2700, pWaveVelocity: 4500,
             jointSetAngle: 45, jointCohesion: 0.1, jointFrictionAngle: 30,
-            elemsPerDeck: 8, cutoffDistance: 0.3
+            elemsPerDeck: 8, cutoffDistance: 0.3, useNioshModified: true
         }, params || {});
     }
 

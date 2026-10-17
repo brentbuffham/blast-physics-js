@@ -18,6 +18,13 @@
  * split column read LOWER than the same column stored as one deck. Charges at
  * different fire times, and different holes, still never add.
  *
+ * NIOSH-MODIFIED (0.3.2, params.useNioshModified, default true): Iverson, Kerkering &
+ * Hustrulid (2008) show the step from the element sum to the integral above moves α
+ * outside the integral and is not valid, and use PPV = K · Q^α / R̄^β with R̄ the mean
+ * distance to the charge (their eq 8–9). Here R̄ is mass-weighted — exactly
+ * (1/L)∫R dz for a uniform column. Set useNioshModified: false for the original 1979
+ * integral. The two agree beyond about a third of the charge length.
+ *
  * ⏪ BEFORE 0.3.0 this raised each element to α and RMS-summed the results:
  *
  *     var ppvElem = K * Math.pow(elementCharge, alpha) * Math.pow(R, -beta);
@@ -36,13 +43,15 @@
 import { SAME_FIRE_MS } from "../core/ChargeColumns.js";
 
 /**
- * The geometric sum Σ w_i · R_i^(−β/α) for each CHARGE at a point: the decks of one
- * hole that fire at the same time share one sum.
+ * Per CHARGE at a point (the decks of one hole that fire at the same time):
+ *   sum   = Σ w_i · R_i^(−β/α)   (R floored at the cutoff) — the 1979 integral
+ *   mass  = Σ w_i                 — Q
+ *   massR = Σ w_i · R_i           (true R) — for the NIOSH mean distance
  *
  * @param {{ x:number, y:number, z:number }} point
  * @param {Array} deckEntries - DeckEntry objects (holeIndex and timingMs are used)
  * @param {{alpha_hp:number, beta_hp:number, elemsPerDeck:number, cutoffDistance:number}} p
- * @returns {number[]} one sum per charge
+ * @returns {Array<{sum:number, mass:number, massR:number}>} one entry per charge
  */
 export function holmbergPerssonChargeSums(point, deckEntries, p) {
     var betaOverAlpha = p.beta_hp / p.alpha_hp;
@@ -64,7 +73,7 @@ export function holmbergPerssonChargeSums(point, deckEntries, p) {
         for (var k = 0; k < groups.length; k++) {
             if (groups[k].hole === hole && Math.abs(groups[k].time - time) <= SAME_FIRE_MS) { g = groups[k]; break; }
         }
-        if (!g) { g = { hole: hole, time: time, sum: 0 }; groups.push(g); }
+        if (!g) { g = { hole: hole, time: time, sum: 0, mass: 0, massR: 0 }; groups.push(g); }
 
         var dL = deckLen / elemsPerDeck;
         var elementCharge = (dk.mass / deckLen) * dL;  // kg
@@ -75,11 +84,26 @@ export function holmbergPerssonChargeSums(point, deckEntries, p) {
             var dx = point.x - (topX + dirX * elemOffset);
             var dy = point.y - (topY + dirY * elemOffset);
             var dz = point.z - (topZ + dirZ * elemOffset);
-            var R = Math.max(Math.sqrt(dx * dx + dy * dy + dz * dz), cutoff);
-            g.sum += elementCharge * Math.pow(R, -betaOverAlpha);
+            var Rtrue = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            g.sum += elementCharge * Math.pow(Math.max(Rtrue, cutoff), -betaOverAlpha);
+            g.mass += elementCharge;
+            g.massR += elementCharge * Rtrue;
         }
     }
-    return groups.map(function (gr) { return gr.sum; });
+    return groups.map(function (gr) { return { sum: gr.sum, mass: gr.mass, massR: gr.massR }; });
+}
+
+/**
+ * PPV (mm/s) of one charge from holmbergPerssonChargeSums.
+ * @param {{sum:number, mass:number, massR:number}} charge
+ * @param {{K_hp:number, alpha_hp:number, beta_hp:number, cutoffDistance:number, useNioshModified?:boolean}} p
+ */
+export function holmbergPerssonChargePPV(charge, p) {
+    if (p.useNioshModified !== false && p.useNioshModified !== 0) {
+        var rbar = Math.max(charge.massR / Math.max(charge.mass, 1e-6), p.cutoffDistance);
+        return p.K_hp * Math.pow(charge.mass, p.alpha_hp) / Math.pow(rbar, p.beta_hp);
+    }
+    return p.K_hp * Math.pow(charge.sum, p.alpha_hp);
 }
 
 /**
@@ -93,20 +117,21 @@ export function holmbergPerssonChargeSums(point, deckEntries, p) {
  * @param {number} [params.beta_hp=1.5]       - β, the distance exponent
  * @param {number} [params.elemsPerDeck=8]    - converged by 8; 64 gives the same answer
  * @param {number} [params.cutoffDistance=0.3]
+ * @param {boolean} [params.useNioshModified=true] - false = original 1979 integral
  * @returns {number} Peak PPV over all charges (mm/s)
  */
 export function computeHolmbergPerssonDamage(point, deckEntries, params) {
     var p = Object.assign({
         K_hp: 700, alpha_hp: 0.7, beta_hp: 1.5,
         elemsPerDeck: 8,
-        cutoffDistance: 0.3
+        cutoffDistance: 0.3,
+        useNioshModified: true
     }, params || {});
 
     var peakPPV = 0.0;
-    var sums = holmbergPerssonChargeSums(point, deckEntries, p);
-    for (var i = 0; i < sums.length; i++) {
-        // ... raised to α once, per charge
-        var ppv = p.K_hp * Math.pow(sums[i], p.alpha_hp);
+    var charges = holmbergPerssonChargeSums(point, deckEntries, p);
+    for (var i = 0; i < charges.length; i++) {
+        var ppv = holmbergPerssonChargePPV(charges[i], p);
         if (ppv > peakPPV) peakPPV = ppv;
     }
     return peakPPV;
@@ -116,7 +141,7 @@ export class HolmbergPerssonDamageModel {
     constructor(params) {
         this.params = Object.assign({
             K_hp: 700, alpha_hp: 0.7, beta_hp: 1.5,
-            elemsPerDeck: 8, cutoffDistance: 0.3
+            elemsPerDeck: 8, cutoffDistance: 0.3, useNioshModified: true
         }, params || {});
     }
 

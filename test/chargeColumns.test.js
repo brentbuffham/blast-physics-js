@@ -76,6 +76,6 @@ describe("Holmberg-Persson — one charge per hole and fire time", () => {
     it("Jointed Rock uses the same charges: a split column = one deck", () => {
         const whole = computeJointedRockDamage(P, [seg(3.2, 12, 0, 525)], HP);
         const split = computeJointedRockDamage(P, [seg(3.2, 10.6, 0, 525), seg(10.6, 12, 0, 525)], HP);
-        expect(split).toBeCloseTo(whole, 3);
+        expect(Math.abs(split - whole) / whole).toBeLessThan(1e-3);   // NIOSH R̄ samples element midpoints
     });
 });
