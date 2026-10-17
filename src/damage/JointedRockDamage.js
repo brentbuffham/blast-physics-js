@@ -33,7 +33,7 @@ import { holmbergPerssonChargeSums, holmbergPerssonChargePPV } from "./HolmbergP
  * @param {number} [params.jointFrictionAngle=30]     - degrees
  * @param {number} [params.elemsPerDeck=8]
  * @param {number} [params.cutoffDistance=0.3]
- * @param {boolean} [params.useNioshModified=true] - false = original 1979 H-P integral
+ * @param {boolean} [params.useNioshModified=false] - true = NIOSH-modified (2008)
  * @returns {number} Damage ratio (>1 = failure)
  */
 export function computeJointedRockDamage(point, deckEntries, params) {
@@ -42,7 +42,7 @@ export function computeJointedRockDamage(point, deckEntries, params) {
         rockTensileStrength: 10,
         rockDensity: 2700, pWaveVelocity: 4500,
         jointSetAngle: 45, jointCohesion: 0.1, jointFrictionAngle: 30,
-        elemsPerDeck: 8, cutoffDistance: 0.3, useNioshModified: true
+        elemsPerDeck: 8, cutoffDistance: 0.3, useNioshModified: false
     }, params || {});
 
     var jointAngleRad = p.jointSetAngle * Math.PI / 180.0;
@@ -58,7 +58,7 @@ export function computeJointedRockDamage(point, deckEntries, params) {
     var charges = holmbergPerssonChargeSums(point, deckEntries, p);
 
     for (var d = 0; d < charges.length; d++) {
-        var ppv = holmbergPerssonChargePPV(charges[d], p);  // mm/s (NIOSH-modified unless useNioshModified: false)
+        var ppv = holmbergPerssonChargePPV(charges[d], p);  // mm/s (1979 integral unless useNioshModified: true)
 
         // Convert PPV (mm/s) to dynamic stress (MPa)
         // σ_d = ρ × Vp × PPV × 1e-3 / 1e6 = ρ × Vp × PPV × 1e-9
@@ -89,7 +89,7 @@ export class JointedRockDamageModel {
             rockTensileStrength: 10,
             rockDensity: 2700, pWaveVelocity: 4500,
             jointSetAngle: 45, jointCohesion: 0.1, jointFrictionAngle: 30,
-            elemsPerDeck: 8, cutoffDistance: 0.3, useNioshModified: true
+            elemsPerDeck: 8, cutoffDistance: 0.3, useNioshModified: false
         }, params || {});
     }
 

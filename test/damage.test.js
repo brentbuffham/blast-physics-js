@@ -75,15 +75,15 @@ describe("Holmberg-Persson — published form (NIOSH worked example)", () => {
     });
     // Receiver 2 m away, level with the middle of the column.
     const at = { x: 2, y: 0, z: -1.5 };
-    const P = { K_hp: 700, alpha_hp: 0.7, beta_hp: 1.5, cutoffDistance: 0.01, useNioshModified: false };
+    const P = { K_hp: 700, alpha_hp: 0.7, beta_hp: 1.5, cutoffDistance: 0.01 };   // default = 1979 integral
 
     it("the original 1979 integral gives 476 mm/s", () => {
         const ppv = computeHolmbergPerssonDamage(at, [column], { ...P, elemsPerDeck: 8 });
         expect(Math.abs(ppv - 476) / 476).toBeLessThan(0.005);
     });
 
-    it("NIOSH-modified (the default) reproduces the paper's worked example: 471 mm/s", () => {
-        const ppv = computeHolmbergPerssonDamage(at, [column], { K_hp: 700, alpha_hp: 0.7, beta_hp: 1.5, elemsPerDeck: 64 });
+    it("NIOSH-modified (opt-in) reproduces the paper's worked example: 471 mm/s", () => {
+        const ppv = computeHolmbergPerssonDamage(at, [column], { K_hp: 700, alpha_hp: 0.7, beta_hp: 1.5, elemsPerDeck: 64, useNioshModified: true });
         expect(Math.abs(ppv - 471) / 471).toBeLessThan(0.005);
     });
 

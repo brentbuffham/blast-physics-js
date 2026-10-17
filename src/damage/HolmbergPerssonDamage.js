@@ -18,12 +18,13 @@
  * split column read LOWER than the same column stored as one deck. Charges at
  * different fire times, and different holes, still never add.
  *
- * NIOSH-MODIFIED (0.3.2, params.useNioshModified, default true): Iverson, Kerkering &
+ * NIOSH-MODIFIED (0.3.2, opt-in: params.useNioshModified: true): Iverson, Kerkering &
  * Hustrulid (2008) show the step from the element sum to the integral above moves α
  * outside the integral and is not valid, and use PPV = K · Q^α / R̄^β with R̄ the mean
  * distance to the charge (their eq 8–9). Here R̄ is mass-weighted — exactly
- * (1/L)∫R dz for a uniform column. Set useNioshModified: false for the original 1979
- * integral. The two agree beyond about a third of the charge length.
+ * (1/L)∫R dz for a uniform column. The DEFAULT stays the original 1979 integral: it
+ * follows the column's length and angle in 3D, while R̄ rounds the zone about the
+ * column centre. The two agree beyond about a third of the charge length.
  *
  * ⏪ BEFORE 0.3.0 this raised each element to α and RMS-summed the results:
  *
@@ -99,7 +100,7 @@ export function holmbergPerssonChargeSums(point, deckEntries, p) {
  * @param {{K_hp:number, alpha_hp:number, beta_hp:number, cutoffDistance:number, useNioshModified?:boolean}} p
  */
 export function holmbergPerssonChargePPV(charge, p) {
-    if (p.useNioshModified !== false && p.useNioshModified !== 0) {
+    if (p.useNioshModified === true || p.useNioshModified === 1) {
         var rbar = Math.max(charge.massR / Math.max(charge.mass, 1e-6), p.cutoffDistance);
         return p.K_hp * Math.pow(charge.mass, p.alpha_hp) / Math.pow(rbar, p.beta_hp);
     }
@@ -117,7 +118,7 @@ export function holmbergPerssonChargePPV(charge, p) {
  * @param {number} [params.beta_hp=1.5]       - β, the distance exponent
  * @param {number} [params.elemsPerDeck=8]    - converged by 8; 64 gives the same answer
  * @param {number} [params.cutoffDistance=0.3]
- * @param {boolean} [params.useNioshModified=true] - false = original 1979 integral
+ * @param {boolean} [params.useNioshModified=false] - true = NIOSH-modified (2008)
  * @returns {number} Peak PPV over all charges (mm/s)
  */
 export function computeHolmbergPerssonDamage(point, deckEntries, params) {
@@ -125,7 +126,7 @@ export function computeHolmbergPerssonDamage(point, deckEntries, params) {
         K_hp: 700, alpha_hp: 0.7, beta_hp: 1.5,
         elemsPerDeck: 8,
         cutoffDistance: 0.3,
-        useNioshModified: true
+        useNioshModified: false
     }, params || {});
 
     var peakPPV = 0.0;
@@ -141,7 +142,7 @@ export class HolmbergPerssonDamageModel {
     constructor(params) {
         this.params = Object.assign({
             K_hp: 700, alpha_hp: 0.7, beta_hp: 1.5,
-            elemsPerDeck: 8, cutoffDistance: 0.3, useNioshModified: true
+            elemsPerDeck: 8, cutoffDistance: 0.3, useNioshModified: false
         }, params || {});
     }
 
