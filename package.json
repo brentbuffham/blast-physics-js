@@ -1,8 +1,11 @@
 {
   "name": "blast-physics-js",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "JavaScript blast physics engine for mining — vibration, damage, detonation, flyrock, frequency analysis, ripple tank, KAP import and voxel blast movement (muckpile) models",
-  "author": "Brent Buffham <blastingapps.com>",
+  "author": {
+    "name": "Brent Buffham",
+    "url": "https://blastingapps.com"
+  },
   "license": "MIT",
   "type": "module",
   "main": "dist/blast-physics-js.cjs",
@@ -17,11 +20,17 @@
     },
     "./src/*": {
       "import": "./src/*"
-    }
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
   },
   "files": [
     "dist/",
-    "src/"
+    "src/",
+    "CHANGELOG.md"
   ],
   "keywords": [
     "blast",
@@ -50,14 +59,22 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/brentbuffham/blast-physics-js"
+    "url": "git+https://github.com/brentbuffham/blast-physics-js.git"
   },
-  "homepage": "https://blastingapps.com",
+  "homepage": "https://github.com/brentbuffham/blast-physics-js#readme",
+  "bugs": {
+    "url": "https://github.com/brentbuffham/blast-physics-js/issues"
+  },
+  "funding": {
+    "type": "individual",
+    "url": "https://buymeacoffee.com/brentbuffham"
+  },
   "scripts": {
     "build": "vite build",
     "prepare": "vite build",
+    "prepublishOnly": "vitest run",
     "build:pages": "vite build --config vite.pages.config.js && cp examples/SWELLFACTOR.kap dist-pages/",
-    "dev": "npx vite examples --port 5175",
+    "dev": "vite examples --port 5175",
     "precompute": "node examples/precompute.mjs",
     "test": "vitest run",
     "test:watch": "vitest"

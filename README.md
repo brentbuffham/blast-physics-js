@@ -1,7 +1,7 @@
 <p align="center">
-  <img src="docs/icons/blastingapps-icon.png" alt="Blasting Apps" width="80" height="80" />
+  <img src="https://raw.githubusercontent.com/brentbuffham/blast-physics-js/main/docs/icons/blastingapps-icon.png" alt="Blasting Apps" width="80" height="80" />
   &nbsp;&nbsp;&nbsp;
-  <img src="docs/icons/kirra-icon.png" alt="Kirra" width="80" height="80" />
+  <img src="https://raw.githubusercontent.com/brentbuffham/blast-physics-js/main/docs/icons/kirra-icon.png" alt="Kirra" width="80" height="80" />
 </p>
 
 <h1 align="center">blast-physics-js</h1>
@@ -13,6 +13,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/blast-physics-js"><img src="https://img.shields.io/npm/v/blast-physics-js?color=cc0000&style=flat-square" alt="npm version" /></a>
+  <a href="https://github.com/brentbuffham/blast-physics-js/actions/workflows/ci.yml"><img src="https://github.com/brentbuffham/blast-physics-js/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License" /></a>
   <a href="https://blastingapps.com"><img src="https://img.shields.io/badge/blastingapps.com-black?style=flat-square" alt="blastingapps.com" /></a>
   <a href="https://kirra-design.com"><img src="https://img.shields.io/badge/kirra--design.com-cc0000?style=flat-square" alt="kirra-design.com" /></a>
@@ -30,10 +31,10 @@ It is the physics companion to [Kirra](https://github.com/brentbuffham/Kirra) �
 npm install blast-physics-js
 ```
 
-> **0.3.0 changes published numbers.** Several models disagreed with the papers
-> they cite; the corrections are listed under
-> [Breaking changes in 0.3.0](#breaking-changes-in-030) below. If you have
-> results computed with 0.2.x, read that section before comparing.
+> **Upgrading?** 0.3.x releases correct models against the papers they cite,
+> and several of those corrections change published numbers — including flyrock
+> clearance distances in 0.3.1. Read the [CHANGELOG](https://github.com/brentbuffham/blast-physics-js/blob/main/CHANGELOG.md)
+> before comparing results from an earlier version.
 
 
 ## Features
@@ -62,15 +63,18 @@ npm install blast-physics-js
 
 ## Demos
 
+Live: **[brentbuffham.github.io/blast-physics-js](https://brentbuffham.github.io/blast-physics-js/)**. To run them locally:
+
 ```bash
+npm install
 npm run dev
 ```
 
-Opens http://localhost:5175 with three pages:
+That opens http://localhost:5175 with three demos, all driven by the bundled `examples/SWELLFACTOR.kap`:
 
 | Page | What it shows |
 |------|---------------|
-| `index.html` | Pre-computed volumetric vibration / damage / pressure point clouds with slice planes |
+| `analysis.html` | Every live model — vibration, damage, pressure, SDoB — evaluated on the KAP's holes, with draggable cross-sections |
 | `throw.html` | **Blast throw / muckpile simulator** — loads `examples/SWELLFACTOR.kap` (531 holes, PREBLAST_VOLUME, SHELL, POSTBLAST_MUCKPILE), voxelises the blast volume, launches blocks with Yang 3DMuck kinematics, runs the sphere DEM, and back-calculates Pe from the surveyed muckpile. Drop any Kirra `.kap` on it. |
 | `ripple.html` | **Ripple tank** wave field with wave-front rings, IDI stems, impulse-train FFT and a click-to-place monitor with L/T/V forward-array synthesis and PoE readout |
 
@@ -155,17 +159,25 @@ const poe = poeFromPrediction(rx.value, 25 /* mm/s limit */, 0.22 /* site σ */)
 ### Web Worker (Blair time-domain)
 
 ```javascript
-import { createBlairWorker } from 'blast-physics-js/workers';
+import { BLAIR_HEAVY_WORKER_URL } from 'blast-physics-js/workers';
 
-const worker = createBlairWorker();
-const strip = await worker.compute({
+const worker = new Worker(BLAIR_HEAVY_WORKER_URL, { type: 'module' });
+worker.onmessage = (e) => {
+  if (e.data.type === 'progress') console.log(e.data.completedRows, '/', e.data.totalStripRows);
+  if (e.data.type === 'stripResult') {
+    const { strip, startRow, endRow, totalCols } = e.data.data;   // strip: Float32Array
+  }
+  if (e.data.type === 'error') console.error(e.data.message);
+};
+worker.postMessage({ type: 'computeStrip', payload: {
   deckEntries, holeEntries,
   gridParams: { minX, minY, elevation },
   modelParams: { K: 700, B: 1.5, bandwidth: 10000 },
-  startRow: 0, endRow: 100
-});
-// strip: Float32Array
+  startRow: 0, endRow: 100, totalCols, totalRows, actualCellX, actualCellY
+} });
 ```
+
+Split the grid into row strips across several workers for parallelism. `FLYROCK_WORKER_URL` is exported the same way.
 
 ## Data Structures
 
@@ -255,11 +267,15 @@ Captures constructive/destructive interference. O(n × M × T) per point. Web Wo
 
 ## Damage Models
 
-**Holmberg-Persson**: Near-field PPV (mm/s) via sub-element integration, in the published form
+**Holmberg-Persson**: Near-field PPV (mm/s) via sub-element integration, in the published 1979 form
 `PPV = K·[Σ w·R^(−β/α)]^α` — the sum is raised to α once, so the result converges in
-`elemsPerDeck`. Compare it against a critical PPV yourself: 700–1000 mm/s for new cracks
+`elemsPerDeck`. A charge is everything in a hole that fires together: touching explosive decks
+form one column, and decks separated by stemming or air add when they fire at the same time.
+Different fire times stay separate events, and holes never add. Pass `useNioshModified: true` for
+the NIOSH form (Iverson, Kerkering & Hustrulid 2008), `PPV = K·Q^α / R̄^β` with R̄ the mean distance
+to the charge; it agrees with 1979 beyond about a third of the charge length and reads lower close in.
+Compare the result against a critical PPV yourself: 700–1000 mm/s for new cracks
 in Swedish igneous rock (NIOSH p29), or `PPVcrit = T·Vp/E` (Persson 1994 via Onederra Eq 11).
-**Changed in 0.3.0** — this returned `peakPPV / ppvCritical` as a unitless damage index before.
 
 **Jointed Rock**: Combined intact rock fracture (σ_d / σ_t) and Mohr-Coulomb joint failure (τ / (c + μσ_n)).
 
@@ -267,7 +283,7 @@ in Swedish igneous rock (NIOSH p29), or `PPVcrit = T·Vp/E` (Persson 1994 via On
 
 > ⚠️ **Corrected in 0.3.1.** Lundborg and McKenzie both carried transcription
 > errors. **If you computed a clearance zone with 0.3.0 or earlier, recompute it** —
-> see [Flyrock corrections in 0.3.1](#flyrock-corrections-in-031).
+> see the [0.3.1 notes in the CHANGELOG](https://github.com/brentbuffham/blast-physics-js/blob/main/CHANGELOG.md#031--2026-09-21).
 
 Four published algorithms. They are not a ladder of conservatism — they model
 different mechanisms and take different inputs:
@@ -332,7 +348,7 @@ Wavelets: causal Ricker (physical default), Gaussian bell, damped sinusoid, Berl
 | `signal/SignatureDeconvolution.js` | Li & Silva-Castro (2017) spectral-division extraction of the single-hole signature |
 | `signal/Detune.js` | reproducible timing dither (uniform / triangular / positive), nonel palette snap, rolling-window event-rate constraint |
 
-## Blast Movement (Phase 5 — implemented)
+## Blast Movement
 
 Physics-based blast throw / muckpile prediction — an open-source approach to the problem solved by Orica's OREPro 3D Predict. Ported from the Kirra blast-throw simulator (throw_4 generation).
 
@@ -355,8 +371,9 @@ blast-physics-js/
   src/
     index.js
     core/
-      DeckEntry.js             HoleEntry.js            RadiationPattern.js
-      Waveform.js              RockMass.js
+      DeckEntry.js             HoleEntry.js            ChargeColumns.js
+      RadiationPattern.js      BlairScaledHeelan.js    Waveform.js
+      RockMass.js              Constants.js
     vibration/
       PPV.js                   PPVDeck.js              ScaledHeelan.js
       ScaledHeelanBlair.js     HeelanOriginal.js       BlairMinchinton.js
@@ -382,124 +399,12 @@ blast-physics-js/
     io/
       KAPReader.js             ZipReader.js            MonitorCSV.js
     workers/
-      BlairHeavyWorker.js      FlyrockWorker.js
-  examples/
-    index.html  throw.html  ripple.html  SWELLFACTOR.kap
-  test/
-  dist/
+      BlairHeavyWorker.js      FlyrockWorker.js        index.js
+  examples/                    demos (not shipped to npm)
+    index.html  analysis.html  throw.html  ripple.html  SWELLFACTOR.kap
+  test/                        vitest suite (not shipped to npm)
+  dist/                        ESM + CJS bundles, built on publish
 ```
-
-## Breaking changes in 0.3.0
-
-Every item here is a place where the code and the published equation disagreed.
-The corrected models are ported from **Kirra's shader implementations, which are
-the reference** — `src/core/BlairScaledHeelan.js` is a 1:1 port of Kirra's file of
-the same name, so the GPU and CPU paths cannot drift. Each source file keeps a
-`⏪ BEFORE 0.3.0` block with the old expression.
-
-**Sources.** Blair & Minchinton (2006) Fragblast-8; Blair (2008) IJRMMS 45;
-Blair (2010) Fragblast-9; Blair & Armstrong (1999) Fragblast 3;
-NIOSH (Iverson, Kerkering & Hustrulid 2008); Onederra & Esen (2004).
-
-| # | Change | Effect on published numbers |
-|---|---|---|
-| 1 | **Holmberg-Persson sums first, then raises to α once** (`PPV = K·[Σ w·R^(−β/α)]^α`). The old form raised each element to α and RMS-summed, which never converged. | ~34 % higher at 8 elements, and the answer no longer depends on `elemsPerDeck`. Pinned by the NIOSH worked example: a 3 m column at 1 kg/m, 2 m away at mid-column height → **476 mm/s**. |
-| 2 | **`computeHolmbergPerssonDamage` returns PPV in mm/s**, not `peakPPV / ppvCritical`. `ppvCritical` is no longer a parameter. | Divide by your own threshold to recover the old ratio. `computeGrid` now reports `unit: "mm/s"`. |
-| 3 | **All models use the Blair patterns** — `blairPatternP` (Eq 10) and `blairPatternS` (Eq 11, with α/β folded in). `heelanF1`/`heelanF2` put P at zero and |SV| at maximum at φ = π/2, the reverse of the paper. | PPV was non-monotonic in distance — it read higher at 20 m than at 10 m. The old pair is still exported, marked as the pre-2026 pattern; nothing uses it. |
-| 4 | **Blair 2008 Eq 22 replaces the one-sided primer approximation.** The front leaves the primer in both directions, so paired elements share one increment until the shorter side runs out. | Telescopes to `M^A` **exactly, for any primer position**, so the result is independent of `elemsPerDeck` to within rounding. `ScaledHeelan` previously ignored `primerFraction` entirely. |
-| 5 | **`chargeExponent` is Blair's A and now defaults to 0.8**, matching Kirra. For a square-root site law, Blair 2008 Eq 14 gives A = B/2. | ~3.3× higher for an 80 kg deck. ⚠ **Name collision:** `SiteLaw.js` and `PPV.js` use the same name for the scaled-distance `e`, where 0.5 IS correct. The two are related by A = e·B. Check which you are passing. |
-| 6 | **Q attenuation is GONE from both scaled models.** The `R^(−(B−1))` in the site law already IS the material attenuation (B&M p5). `qualityFactorP`/`S` are accepted and ignored. | Higher in the far field. Q still applies to `HeelanOriginal`, which has no site law to carry it. |
-| 7 | **Elements sum linearly** over per-element resultants, `Σ sqrt(vP² + vSV²)`, not `sqrt(Σ (vP² + vSV²))`. | Conserves charge (Blair 2008 p237). With item 4, `elemsPerDeck` now moves the answer by < 0.1 % from 4 to 32 elements. |
-| 8 | **`HeelanOriginal` rebuilt on B&M Eq 6**: one constant for P and SV, `C = a²·δL·b²·P_b·k6 / (2·μ·Vp)` with μ = ρ·Vs² and k6 = (e/6)⁶/γ6 = 0.189887. Q is evaluated at the pulse's dominant frequency, 2π·0.0597·b, not `VOD/(2a)`. | Very large. The old form used two different denominators, and its ω erased the far field — attenuation of 2.4e−5 at 100 m. It read 26 m/s at 5 m and 0.47 mm/s at 50 m; it now tracks a fitted site law within about 1.4–1.8×. |
-| 9 | **Element mass comes from the deck's own `mass`** in `BlairMinchinton` and `BlairHeavyWorker`, not from `ρₑ·π·RAD²·dL` built on the HOLE radius. | A decoupled deck was overweighted by `(holeDiam/chargeDiam)²` — about 2× at the `DECOUPLED` default. |
-| 10 | **One named VOD fallback**, `DEFAULT_VOD = 5000`, exported from `core/Constants.js`. | Was 5000, 5279 and 5500 in three different files. |
-| 11 | **An explicit `0` is no longer replaced by the default** in `createDeckEntry` or in `BlairHeavyWorker`'s parameter reads. | `Number(x || default)` treated a legitimate zero as missing. |
-
-### Still uncalibrated
-
-B&M p4 is explicit that the unscaled model "can only be used to predict
-normalised vibration values", because the true borehole wall load `P_o` is
-unknown. `HeelanOriginal` assumes `P_b = ρₑ·VOD²/8`, so its absolute mm/s is
-indicative and its SHAPE is the published one. Use `ScaledHeelan`,
-`ScaledHeelanBlair` or `BlairMinchinton` when you need calibrated numbers.
-
-
-
-## Flyrock corrections in 0.3.1
-
-Two transcription errors, both in safety calculations, both ported from Kirra's
-corrected `FlyrockCalculator.js`. `test/flyrockPaperParity.test.js` now locks
-every model to a printed equation rather than to this library's own output — a
-snapshot test cannot catch a transcription error, and that is what these were.
-
-### Lundborg — wrong coefficient AND a spurious unit conversion
-
-```js
-// ⏪ BEFORE 0.3.1
-var Lmax_feet = 260.0 * Math.pow(holeDiamMm / 25.4, 2/3);
-var Lmax_m    = Lmax_feet * 0.3048;
-```
-
-Lundborg published the same throw in two equivalent forms, and that they agree
-numerically is the proof the result is **already metres**:
-
-```
-CRATER  L'max = 260 × ø_in^(2/3)  =  30  × ø_mm^(2/3)    [MK22 Eq.1]
-BENCH   L'max =  40 × ø_in^(2/3)  =  4.6 × ø_mm^(2/3)    [MK22 Eq.2]
-
-260 × (229/25.4)^(2/3) = 1126        30 × 229^(2/3) = 1123
-```
-
-The old code also used the **crater** coefficient unconditionally, with no
-bench/crater choice. For a 229 mm hole it returned 343.3 m — neither published
-equation:
-
-| | Range | vs old |
-|---|---|---|
-| Old code | 343.3 m | — |
-| Bench, Eq.(2) — **the new default** | 172.2 m | old was **1.99× too far** |
-| Crater, Eq.(1) | 1122.9 m | old was **0.31× — 3.3× too short** |
-
-### McKenzie — the 2/3 power reached SDoB
-
-```js
-// ⏪ BEFORE 0.3.1
-var Rmax = 9.74 * Math.pow(holeDiamMm / Math.pow(sDoB, 2.167), 2/3);
-```
-
-MK22 Eq.(5) is `L'max = 9.74 × SDoB^(−2.167) × ø_mm^(2/3)` — **three separate
-factors**. The old grouping pushed the 2/3 onto SDoB too, giving an effective
-exponent of −1.4447. The two forms agree only at SDoB ≈ 1, which is why it
-survived review:
-
-| SDoB | Old | Correct | Ratio |
-|---|---|---|---|
-| 0.638 (under-stemmed) | 697.1 m | 963.9 m | **0.72× — 267 m short** |
-| 1.037 | 346.0 m | 337.0 m | 1.03× |
-| 1.834 (well stemmed) | 151.8 m | 98.0 m | 1.55× |
-
-The under-prediction is at the dangerous end — badly-stemmed holes are the ones
-that actually throw. `rockDensity` was also accepted, defaulted, and never read;
-it now drives Eq. (6) fragment size.
-
-### Also in 0.3.1
-
-- **Roth (1979) added** — `roth()` and `rothAtLaunchAngle()`.
-- **`MODEL_INPUTS` / `usedInputsFor`** — so a result records only the inputs
-  that moved it.
-- **Richards & Moore was already correct** and is unchanged. It matches the
-  reference workbook to 0.03 %.
-
-## Implementation Roadmap
-
-| Phase | Scope | Status |
-|-------|-------|--------|
-| **1** | Core data structures + PPV site law + PPV per-deck | ✅ Complete |
-| **2** | Scaled Heelan + Blair Lite + Holmberg-Persson + Jointed Rock damage | ✅ Complete |
-| **3** | Blair & Minchinton time-domain + Web Workers + Heelan Original | ✅ Complete |
-| **4** | Detonation simulator + flyrock (R&M, Lundborg, McKenzie) + pressure + powder factor | ✅ Complete |
-| **5** | Blast movement: KAP import, voxelisation, Yang 3DMuck launch, sphere DEM (+ optional Rapier), displacement vectors, muckpile surface, survey calibration | ✅ Complete (v0.2.0) |
-| **6** | Kirra analysis suite: ripple tank, FFT / IDI / spectrum, seed & forward-array synthesis, signature deconvolution, site-law regression, receptor PPV, Blair 2011 PoE, SDoB / SEE, detune | ✅ Complete (v0.2.0) |
 
 ## References
 
