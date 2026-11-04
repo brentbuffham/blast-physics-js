@@ -5,7 +5,7 @@ All notable changes to blast-physics-js. The project follows
 change published numbers. Entries marked **changes numbers** move results you
 may already have saved, so read them before comparing old output with new.
 
-## [Unreleased]
+## [0.5.0] — 2026-11-04
 
 Presplit design, moving from the blastingapps presplit analyser so blastingapps and Kirra share
 one copy. Every published method runs side by side.
