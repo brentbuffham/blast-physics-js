@@ -57,6 +57,7 @@ npm install blast-physics-js
 | **Damage** | Holmberg-Persson, Jointed Rock | mm/s, ratio |
 | **Pressure / energy** | Borehole Pressure, Powder Factor, Specific Explosive Energy | MPa, kg/m³, GJ/m³ |
 | **Detonation** | Multi-primer front propagation, Em computation | ms, kg^A |
+| **Fragmentation** | Kuz-Ram (Kuznetsov / Cunningham 1987, 2005 terms), KCO / Swebrec (Ouchterlony 2005), KC-KUM gamma model (Faramarzi et al. 2015), rock factor A, back-fit of A to a measured curve | mm, % passing |
 | **Flyrock** | Richards & Moore, Lundborg, McKenzie (SDoB), Roth (Gurney), volumetric SDoB grid, ballistics (range / apex / flight time / drag) | metres, m/s |
 | **Movement** | Voxel blast throw: Yang 3DMuck kinematic launch + sphere DEM transport (optional Rapier3D adapter), survey calibration | displacement vectors, swell, muckpile surface |
 | **IO** | Kirra `.kap` archives (holes, charging, primers, surfaces), Instantel / Texcel monitor CSVs | HoleEntry / DeckEntry / surfaces |
@@ -279,6 +280,58 @@ in Swedish igneous rock (NIOSH p29), or `PPVcrit = T·Vp/E` (Persson 1994 via On
 
 **Jointed Rock**: Combined intact rock fracture (σ_d / σ_t) and Mohr-Coulomb joint failure (τ / (c + μσ_n)).
 
+## Fragmentation Models
+
+Predicted fragment size distributions for a blast design. **Sizes are in mm** and passing in %;
+burden, spacing, bench height and charge lengths in m; hole diameter in mm; charge in kg per hole.
+
+```js
+import { predictFragmentation, percentileSizes, fitRockFactor, parseKAP,
+         predictBlastFragmentation, fitBlastRockFactor } from "blast-physics-js";
+
+const r = predictFragmentation({
+    burden: 3, spacing: 3.5, benchHeight: 10, holeDiamMm: 89,
+    chargeLength: 8, explosiveDensity: 0.8, rws: 100, rockFactor: 7
+});
+r.x50;                     // Kuznetsov median, mm
+percentileSizes(r.kco);    // { 10, 20, 50, 80, 90 } in mm (also r.kuzRam, r.kckum)
+r.kco.passing(500);        // % passing 500 mm
+
+// Calibrate A to a measured curve (sizes mm, passing %)
+fitRockFactor({ sizes, passing }, design, { model: "kco" });   // { rockFactor, rmse, x50 }
+
+// A whole blast from a Kirra KAP, hole by hole
+const kap = await parseKAP(file);
+const blast = predictBlastFragmentation(kap, { rockFactor: 7, rwsByProduct: { Emulsion: 120 } });
+percentileSizes(blast.kco);     // the blast's P10 … P90
+blast.skipped;                  // [{ holeID, reason }] holes it could not predict
+fitBlastRockFactor({ sizes, passing }, kap, { model: "kco" });
+```
+
+**Hole by hole**: `predictBlastFragmentation` predicts every production hole with its own burden,
+spacing, bench height, diameter and charging (charge mass, explosive length, bottom / column
+charge and RWS from its decks), then mixes the hole curves by the rock each breaks:
+`P(x) = Σ Vᵢ·Pᵢ(x) / Σ Vᵢ` with `Vᵢ = Bᵢ·Sᵢ·Hᵢ`. Inputs are never averaged — the P80 of a
+mixture is not the mean of the P80s. Holes it cannot predict (no burden, no charge, n ≤ 0,
+another hole type) are listed in `skipped` with the reason. `rockFactor` may be a function of the
+hole. Kuz-Ram was calibrated on blast-average designs, so an A fitted hole by hole and one fitted to
+a median design are not interchangeable. A 500-hole blast predicts in about 10 ms.
+
+- **Kuz-Ram**: `x50 [cm] = A·K^-0.8·Q^(1/6)·(115/RWS)^(19/30)` with Cunningham's (1987) uniformity
+  index `n = (2.2 − 14B/d)·√((1+S/B)/2)·(1 − W/B)·(|BCL−CCL|/L + 0.1)^0.1·(L/H)`, B in m and
+  d in mm, and a median-form Rosin-Rammler. The exponent is 19/30: Cunningham (2005) prints 19/20,
+  but Ouchterlony's (2005) worked example only reproduces with 19/30. Optional Cunningham (2005)
+  timing factor A_T, delay scatter n_s and the 2005 n (`options.cunningham2005`).
+- **KCO / Swebrec**: `P = 1/(1 + [ln(xmax/x)/ln(xmax/x50)]^b)` with `b = 2·ln2·ln(xmax/x50)·n`.
+  xmax defaults to min(B, S), Ouchterlony's tentative choice; pass the in-situ block size if known.
+  Same form as las-laz-js's measured-curve fit.
+- **KC-KUM**: two gamma CDFs joined at 40 % passing, with the Spathis median and the modified
+  index n_f (Faramarzi et al. 2015, Eqs 11–16; checked against the paper's Fig 3 table).
+- **Rock factor**: `rockFactorA()`, Cunningham's (2005) corrected form `0.06·(RMD + RDI + HF)`.
+
+Not included: the Crushed Zone Model and Two-Component Model (the published sources disagree on
+the pressure term and the fines fraction), Gheibie et al. (2009) and the extended Swebrec.
+
 ## Flyrock Models
 
 > ⚠️ **Corrected in 0.3.1.** Lundborg and McKenzie both carried transcription
@@ -387,6 +440,9 @@ blast-physics-js/
       HolmbergPerssonDamage.js JointedRockDamage.js
     pressure/
       BoreholePressure.js      PowderFactor.js         SEE.js
+    fragmentation/
+      KuzRam.js                Swebrec.js              KCKUM.js
+      Fragmentation.js         BlastFragmentation.js   Gamma.js
     detonation/
       DetonationSimulator.js   EmComputation.js
     flyrock/
@@ -430,6 +486,13 @@ blast-physics-js/
 - Roth, J. (1979). *A Model for the Determination of Flyrock Range as a Function of Shot
   Conditions*. Management Science Associates for the U.S. Bureau of Mines, Contract
   J0387242. Equations pp.5–11.
+- Cunningham, C.V.B. (1983). *The Kuz-Ram model for prediction of fragmentation from blasting*. 1st Int. Symp. Rock Fragmentation by Blasting, Luleå, 439–453.
+- Cunningham, C.V.B. (1987). *Fragmentation estimations and the Kuz-Ram model — four years on*. 2nd Int. Symp. Rock Fragmentation by Blasting, Keystone, 475–487.
+- Cunningham, C.V.B. (2005). *The Kuz-Ram fragmentation model — 20 years on*. Brighton Conference Proceedings, EFEE, 201–210.
+- Ouchterlony, F. (2005). *The Swebrec function: linking fragmentation by blasting and crushing*. Mining Technology (Trans. IMM A) 114, A29–A44.
+- Ouchterlony, F., Sanchidrián, J.A. & Moser, P. (2017). *Percentile fragment size predictions for blasted rock and the fragmentation-energy fan*. Rock Mech. Rock Eng. 50, 751–779.
+- Faramarzi, F., Ebrahimi Farsangi, M.A. & Mansouri, H. (2015). *Prediction of rock fragmentation using a gamma-based blast fragmentation distribution model*. Fragblast 11, Sydney, 685–692.
+- Spathis, A.T. (2004). *A correction relating to the analysis of the original Kuz-Ram model*. Fragblast 8(4), 201–205.
 - Siskind, D.E. et al. (1980). *Structure response and damage produced by ground vibration from surface mine blasting*. USBM RI 8507.
 
 ## Related Projects

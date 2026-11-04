@@ -34,6 +34,17 @@ function distToSegment(P, A, B) {
 }
 
 /**
+ * Borehole wall pressure Pb = ρ_e · VOD² / 8 (about half the detonation
+ * pressure ρ_e · VOD² / 4).
+ * @param {number} densityGcc - explosive density, g/cm³ (kg/L)
+ * @param {number} vodMs - velocity of detonation, m/s
+ * @returns {number} MPa
+ */
+export function boreholePressureMPa(densityGcc, vodMs) {
+    return densityGcc * 1000 * vodMs * vodMs * 0.125 / 1e6;
+}
+
+/**
  * Compute peak borehole pressure at an observation point.
  *
  * @param {{ x:number, y:number, z:number }} point - Observation point (m)
@@ -63,10 +74,9 @@ export function computeBoreholePressure(point, deckEntries, params) {
 
         var holeRadius = dk.holeDiamMm * 0.0005;  // mm → m radius
         var effectiveVOD = dk.vod > 0 ? dk.vod : p.fallbackVOD;
-        var rho_e = dk.density > 0 ? dk.density * 1000.0 : p.fallbackDensity * 1000.0;  // kg/L → kg/m³
+        var rho_e = dk.density > 0 ? dk.density : p.fallbackDensity;  // kg/L
 
-        // Pb = ρ_e × VOD² / 8 (Pa → MPa)
-        var Pb_MPa = rho_e * effectiveVOD * effectiveVOD * 0.125 / 1e6;
+        var Pb_MPa = boreholePressureMPa(rho_e, effectiveVOD);
 
         var top = { x: dk.topX, y: dk.topY, z: dk.topZ };
         var bot = { x: dk.baseX, y: dk.baseY, z: dk.baseZ };

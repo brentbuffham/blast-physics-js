@@ -5,6 +5,46 @@ All notable changes to blast-physics-js. The project follows
 change published numbers. Entries marked **changes numbers** move results you
 may already have saved, so read them before comparing old output with new.
 
+## [Unreleased] — to be 0.4.0
+
+Fragmentation prediction, moved here from the blastingapps fragmentation analyser so that
+blastingapps and Kirra share one copy. The equations follow the published papers, which
+differ from the analyser in places (listed below).
+
+### Added
+
+- `predictFragmentation(design, options)`: Kuz-Ram, KCO / Swebrec and KC-KUM curves for a
+  blast design, each with `passing(mm)` and `sizeAt(%)`; `percentileSizes()`.
+  Sizes in mm.
+- `fitRockFactor(measured, design, { model })`: rock factor A back-fitted to a measured curve.
+- `predictBlastFragmentation(parseKAP output, options)`: a whole blast hole by hole. Each
+  production hole is predicted with its own burden, spacing, bench height, diameter and
+  charging; the blast curve mixes the hole curves by rock volume (B·S·H). Holes it cannot
+  predict are listed with the reason. `fitBlastRockFactor` back-fits one A for the blast.
+  The analyser reduced a KAP to one median design instead.
+- Building blocks: `rockFactorA`, `kuznetsovX50`, `cunninghamUniformity`,
+  `cunningham2005Uniformity`, `cunninghamTimingFactor`, `cunninghamScatterFactor`,
+  `spathisMedianFactor`, `rosinRammlerPassing` / `Size`, `swebrecPassing` / `Size`, `kcoB`,
+  `swebrecFromPercentiles`, `kckumUniformity`, `kckumParameters`, `kckumCurve`,
+  `tabulatedPassing` / `Size`, `logSizeGrid`, `columnChargeMass`, the gamma functions, and
+  `boreholePressureMPa`.
+- Tests against Ouchterlony's (2005) Bårarp round 4 worked example (x50 44.8 cm, n 1.17,
+  b 2.431), Faramarzi et al. (2015) Table 1 and Fig 3, Cunningham's (2005) Table 1 ranges,
+  and closed forms.
+
+### Differences from the blastingapps analyser
+
+- Uniformity n takes the hole diameter in mm (14·B/d). The analyser divided by d in metres,
+  so n went negative and fell back to 1.0.
+- KC-KUM follows the paper: n_f keeps the /2 of (1 + S/B)/2, the fines law is k = n_f^X50/2,
+  θ = 4·X50, and the coarse law is k = n_f^0.3, θ = (S·X50/B)^1.1, with X50 in m.
+- Rock factor A uses the 2005 form, 0.06·(RMD + RDI + HF). The 1987 printing added JF twice.
+- The Spathis option is the published correction, (ln2)^(1/n)/Γ(1 + 1/n), not ln2 vs 0.693.
+- The Cunningham (2005) option uses the published A_T, n_s and 2005 n.
+- xmax defaults to min(B, S) (Ouchterlony 2005) instead of 2B.
+- Not carried over: the Gheibie ×1.05 factor, the Crushed Zone and Two-Component models,
+  effective burden B·cos θ, and the clamp of n to 0.7–2.2.
+
 ## [0.3.3] — 2026-10-18
 
 Packaging and documentation only. No model or API changes.

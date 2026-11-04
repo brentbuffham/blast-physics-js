@@ -50,9 +50,19 @@ export { inheritColumnFireTimes, sameFireTime, COLUMN_JOIN_M, SAME_FIRE_MS } fro
 export { computeJointedRockDamage, JointedRockDamageModel } from "./damage/JointedRockDamage.js";
 
 // Pressure / energy models
-export { computeBoreholePressure, BoreholePressureModel } from "./pressure/BoreholePressure.js";
+export { computeBoreholePressure, boreholePressureMPa, BoreholePressureModel } from "./pressure/BoreholePressure.js";
 export { computePowderFactor, PowderFactorModel } from "./pressure/PowderFactor.js";
 export { specificExplosiveEnergy, computeSEE, SEEModel } from "./pressure/SEE.js";
+
+// Fragmentation — Kuz-Ram, KCO / Swebrec, KC-KUM, rock factor back-fit (sizes in mm)
+export { rockFactorA, kuznetsovX50, spathisMedianFactor, cunninghamUniformity, cunningham2005Uniformity,
+         cunninghamTimingFactor, cunninghamScatterFactor, rosinRammlerPassing, rosinRammlerSize } from "./fragmentation/KuzRam.js";
+export { swebrecPassing, swebrecSize, kcoB, swebrecFromPercentiles } from "./fragmentation/Swebrec.js";
+export { kckumUniformity, kckumParameters, kckumCurve } from "./fragmentation/KCKUM.js";
+export { predictFragmentation, percentileSizes, columnChargeMass, logSizeGrid, tabulatedPassing, tabulatedSize,
+         fitRockFactor, fitRockFactorWith, FRAGMENTATION_MODELS, DEFAULT_PERCENTS } from "./fragmentation/Fragmentation.js";
+export { predictBlastFragmentation, fitBlastRockFactor, holeFragmentationDesign } from "./fragmentation/BlastFragmentation.js";
+export { logGamma, gammaFunction, regularizedLowerGamma, gammaCDF } from "./fragmentation/Gamma.js";
 
 // Detonation
 export { simulateDetonation, computeEmValues, processHoleDetonation } from "./detonation/DetonationSimulator.js";
