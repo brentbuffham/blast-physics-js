@@ -58,6 +58,7 @@ npm install blast-physics-js
 | **Pressure / energy** | Borehole Pressure, Powder Factor, Specific Explosive Energy | MPa, kg/m³, GJ/m³ |
 | **Detonation** | Multi-primer front propagation, Em computation | ms, kg^A |
 | **Fragmentation** | Kuz-Ram (Kuznetsov / Cunningham 1987, 2005 terms), KCO / Swebrec (Ouchterlony 2005), KC-KUM gamma model (Faramarzi et al. 2015), rock factor A, back-fit of A to a measured curve | mm, % passing |
+| **Presplit** | Konya (empirical PETN cord pressure, required pressure from E), decoupled wall pressure by ideal gas (Niagara), adiabatic (Sanden / Chiappetta), co-volume (Hino), isothermal co-volume (Hustrulid / Utah-NIOSH) and Calder (CANMET), Chiappetta's empirical rules, Workman & Calder's large-hole bottom charge, force-balance spacing, all run side by side | MPa, m |
 | **Flyrock** | Richards & Moore, Lundborg, McKenzie (SDoB), Roth (Gurney), volumetric SDoB grid, ballistics (range / apex / flight time / drag) | metres, m/s |
 | **Movement** | Voxel blast throw: Yang 3DMuck kinematic launch + sphere DEM transport (optional Rapier3D adapter), survey calibration | displacement vectors, swell, muckpile surface |
 | **IO** | Kirra `.kap` archives (holes, charging, primers, surfaces), Instantel / Texcel monitor CSVs | HoleEntry / DeckEntry / surfaces |
@@ -332,6 +333,48 @@ a median design are not interchangeable. A 500-hole blast predicts in about 10 m
 Not included: the Crushed Zone Model and Two-Component Model (the published sources disagree on
 the pressure term and the fines fraction), Gheibie et al. (2009) and the extended Swebrec.
 
+## Presplit Models
+
+A presplit is made by the **gas pressure** in the hole, not the shock: crossing explosive → air →
+rock passes about 0.00001 % of the shock (`shockTransmission`, Konya & Konya 2020). The gas pressure
+on the wall of a decoupled hole is far below the explosion pressure, and the published methods
+differ in how the gas expands into the air gap. `runPresplitModels` runs every one on a design:
+
+```js
+import { runPresplitModels } from "blast-physics-js";
+
+const r = runPresplitModels({
+    holeDiamMm: 76, loadGPerM: 85, densityGcc: 1.4, vodMs: 7000, petnCord: true,
+    tensileMPa: 6, compressiveMPa: 120, youngsModulusGPa: 40, spacingM: 0.8
+});
+r.models;   // per model: wallPressureMPa, maxSpacingM, applicable, crushes, splits, notes, citation
+r.summary;  // min / median / max spacing over the models that apply, and the split votes
+```
+
+| Model | Wall pressure | Spacing | Where it applies |
+|---|---|---|---|
+| Konya empirical | Pg = (105.6·EL − 5488)/dh² psi | Required P = 2.8×10⁷(S/K)², K = (40579/E)^0.625 | PETN cord, decoupling > 3, S ≥ 0.61 m |
+| Ideal gas (Niagara) | Pw = Pe·Ve/Vh | S = dh·(Pw + T)/T | overestimates at small volume ratios |
+| Adiabatic (Sanden) | Pw = Pe·(Ve/Vh)^γ, 2γ = 2.4 | same | Hustrulid finds 2γ = 2.4 wrong for cylinders |
+| Co-volume (Hino) | Pw = Pe·(υe − αe)/(υh − αh) | same | |
+| Isothermal (Utah/NIOSH) | Pw = Pe·ae/a, a = υ − 1.1e^(−0.473/υ) | same | ρe 0.67–2.5 g/cm³ |
+| Calder (CANMET) | Pw = N(ρ)·ρD²·(√C·rc/rh)^2.4 psi, N from Workman & Calder Fig 1 | same | ρe 0.8–2.0 g/cm³ |
+| Chiappetta plane charge | — | S = linear charge / 0.1 lb/ft² (0.488 kg/m²) | holes up to 6¾ in; no rock properties |
+| Chiappetta field table | — | tabulated range by hole size | 1.5–8 in, tabulated sizes only |
+
+Pe = ρe·D²/8 is the explosion pressure (half the C-J pressure ρD²/4). A wall pressure over the
+compressive strength crushes the wall (`crushes`). Each model is tested against the papers' worked
+examples (Hustrulid 2007: Hino's example, his Table 2, Sanden's Queenston blocks, the Atlas Kleen
+Cut road cut; CDOT 2018 works the same road cut with Sanden's form; Chiappetta 1990's four worked
+examples; Workman & Calder 1991's Tables 1–4). Chiappetta's Method I is Sanden's form with
+1.69×10⁻³·ρD² psi (ρD²/8 rounded), so it is the adiabatic row. Berta (1990) is not in yet: its
+specific pressure needs the primary source.
+
+Also from these papers: `calderBottomChargeKg` (Workman & Calder's single bottom charge for a
+large unstemmed presplit hole: the distributed charge that gives a target pressure, placed in the
+bottom) and `chiappettaAirDeckGuide` (air-deck spacing, stemming, burden and charge as multiples
+of the hole diameter).
+
 ## Flyrock Models
 
 > ⚠️ **Corrected in 0.3.1.** Lundborg and McKenzie both carried transcription
@@ -440,6 +483,9 @@ blast-physics-js/
       HolmbergPerssonDamage.js JointedRockDamage.js
     pressure/
       BoreholePressure.js      PowderFactor.js         SEE.js
+    presplit/
+      Presplit.js              WallPressure.js         PresplitModels.js
+      Chiappetta.js            WorkmanCalder.js
     fragmentation/
       KuzRam.js                Swebrec.js              KCKUM.js
       Fragmentation.js         BlastFragmentation.js   Gamma.js
@@ -486,6 +532,13 @@ blast-physics-js/
 - Roth, J. (1979). *A Model for the Determination of Flyrock Range as a Function of Shot
   Conditions*. Management Science Associates for the U.S. Bureau of Mines, Contract
   J0387242. Equations pp.5–11.
+- Konya, A., Konya, C. & Worsey, P. *Determination of Presplit Borehole Pressure*. ISEE.
+- Konya, A. & Konya, C. (2020). *Presplit Design Based on Borehole Pressures*. ISEE 2020g.
+- Hustrulid, W.A. (2007). *A practical, yet technically sound, design procedure for pre-split blasts*. 33rd ISEE Annual Conference, Nashville, Vol 1, 1–26.
+- Kutter, H.K. & Fairhurst, C. *The roles of stress wave and gas pressure in presplitting*.
+- Chiappetta, R.F. (1990). *Presplitting and controlled blasting techniques*. 2nd High-Tech Seminar, Orlando, ISEE, Section 14.
+- Workman, J.L. & Calder, P.N. (1991). *A method for calculating the weight of charge to use in large hole pre-splitting for cast blasting operations*. 17th ISEE Conference, Vol 2, 97–105.
+- Petr, V., Lozano, E. & Nieczkoski, E. (2018). *Rock Excavation Best Management Practice Phase I*. Colorado School of Mines for CDOT, Report CDOT-2018-07.
 - Cunningham, C.V.B. (1983). *The Kuz-Ram model for prediction of fragmentation from blasting*. 1st Int. Symp. Rock Fragmentation by Blasting, Luleå, 439–453.
 - Cunningham, C.V.B. (1987). *Fragmentation estimations and the Kuz-Ram model — four years on*. 2nd Int. Symp. Rock Fragmentation by Blasting, Keystone, 475–487.
 - Cunningham, C.V.B. (2005). *The Kuz-Ram fragmentation model — 20 years on*. Brighton Conference Proceedings, EFEE, 201–210.

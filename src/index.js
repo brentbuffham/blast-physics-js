@@ -64,6 +64,19 @@ export { predictFragmentation, percentileSizes, columnChargeMass, logSizeGrid, t
 export { predictBlastFragmentation, fitBlastRockFactor, holeFragmentationDesign } from "./fragmentation/BlastFragmentation.js";
 export { logGamma, gammaFunction, regularizedLowerGamma, gammaCDF } from "./fragmentation/Gamma.js";
 
+// Presplit — Konya borehole pressures and spacing, C-J pressure, shock transmission (SI in, MPa out)
+export { mpaToPsi, psiToMpa, gramsPerMetreToGrainsPerFoot, decouplingRatio, detonationPressureMPa,
+         acousticImpedance, shockTransmission, konyaPresplitFactor, konyaRequiredPressureMPa, konyaMaxSpacingM,
+         konyaEmpiricalPressureMPa, konyaDetonationModelPressureMPa } from "./presplit/Presplit.js";
+export { explosionPressureMPa, chargeDiameterFromLoadMm, volumeRatio, hustrulidCovolume, hinoCovolume,
+         idealGasWallPressureMPa, adiabaticWallPressureMPa, hinoWallPressureMPa, isothermalWallPressureMPa,
+         forceBalanceSpacingM, webTensionMPa } from "./presplit/WallPressure.js";
+export { runPresplitModels, PRESPLIT_MODELS } from "./presplit/PresplitModels.js";
+export { chiappettaPlaneLoadKgPerM, chiappettaPlaneSpacingM, chiappettaFieldRow, chiappettaAirDeckGuide,
+        CHIAPPETTA_FIELD_TABLE, CHIAPPETTA_PLANE_CHARGE_KG_M2, CHIAPPETTA_PLANE_MAX_HOLE_MM } from "./presplit/Chiappetta.js";
+export { calderNFactor, calderCoupledPressureMPa, calderWallPressureMPa, calderChargeDiameterMm,
+        calderBottomChargeKg, CALDER_N_POINTS } from "./presplit/WorkmanCalder.js";
+
 // Detonation
 export { simulateDetonation, computeEmValues, processHoleDetonation } from "./detonation/DetonationSimulator.js";
 export { computeSequentialEm, computePrimerAwareEm } from "./detonation/EmComputation.js";

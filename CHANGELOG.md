@@ -5,6 +5,38 @@ All notable changes to blast-physics-js. The project follows
 change published numbers. Entries marked **changes numbers** move results you
 may already have saved, so read them before comparing old output with new.
 
+## [Unreleased]
+
+Presplit design, moving from the blastingapps presplit analyser so blastingapps and Kirra share
+one copy. Every published method runs side by side.
+
+### Added
+
+- `runPresplitModels(design)`: each model's borehole wall pressure, widest splitting spacing,
+  whether the design is in its range, whether it crushes the wall, and whether a given spacing
+  splits; a summary over the models that apply. `PRESPLIT_MODELS` lists them with citations.
+- Konya: `konyaEmpiricalPressureMPa` (PETN cord), `konyaDetonationModelPressureMPa`,
+  `konyaPresplitFactor`, `konyaRequiredPressureMPa`, `konyaMaxSpacingM`.
+- Decoupled wall pressure (Hustrulid 2007): `idealGasWallPressureMPa` (Niagara),
+  `adiabaticWallPressureMPa` (Sanden), `hinoWallPressureMPa`, `isothermalWallPressureMPa`
+  (Utah/NIOSH), with `explosionPressureMPa` (ρD²/8), `volumeRatio`, the co-volume fits,
+  `chargeDiameterFromLoadMm`, `forceBalanceSpacingM` and `webTensionMPa`.
+- Calder (CANMET, via Workman & Calder 1991): `calderNFactor`, `calderCoupledPressureMPa`,
+  `calderWallPressureMPa` (model `calder-canmet`), `calderChargeDiameterMm` and
+  `calderBottomChargeKg` (the bottom charge for a large unstemmed presplit hole).
+- Chiappetta (1990): the plane-charge rule `chiappettaPlaneLoadKgPerM` / `chiappettaPlaneSpacingM`
+  (model `chiappetta-plane`), the field table `CHIAPPETTA_FIELD_TABLE` / `chiappettaFieldRow`
+  (model `chiappetta-field`) and `chiappettaAirDeckGuide`. His Method I is Sanden's adiabatic form.
+- `detonationPressureMPa` (C-J, ρD²/4), `acousticImpedance`, `shockTransmission`,
+  `decouplingRatio`, and psi / grains-per-foot conversions.
+- Tests against the papers' worked numbers: Konya & Konya (2020), Hustrulid (2007) and CDOT
+  (2018), which works Hustrulid's Kleen Cut road cut with Sanden's adiabatic form (145 MPa and
+  1.85 m for Kleen Cut E, against the isothermal method's 115 MPa and 1.48 m). Where a paper's own arithmetic slips (Hustrulid's
+  5-strand Queenston pressure, the Kleen Cut U spacing printed 1.62 m for 1.66 m, two Technique 2
+  table values), the test says so and uses the consistent value. Chiappetta's ten worked
+  pressures and Workman & Calder's Tables 1–4 are tests too. Chiappetta's Example 2 spacing is
+  printed 78 in, from 2rh = 6 for a 3 in hole; the right value is 39 in.
+
 ## [0.4.0] — 2026-11-04
 
 Fragmentation prediction, moved here from the blastingapps fragmentation analyser so that
