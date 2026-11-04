@@ -5,7 +5,7 @@ All notable changes to blast-physics-js. The project follows
 change published numbers. Entries marked **changes numbers** move results you
 may already have saved, so read them before comparing old output with new.
 
-## [Unreleased] — to be 0.4.0
+## [0.4.0] — 2026-11-04
 
 Fragmentation prediction, moved here from the blastingapps fragmentation analyser so that
 blastingapps and Kirra share one copy. The equations follow the published papers, which
