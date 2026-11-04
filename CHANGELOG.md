@@ -27,6 +27,11 @@ one copy. Every published method runs side by side.
 - Chiappetta (1990): the plane-charge rule `chiappettaPlaneLoadKgPerM` / `chiappettaPlaneSpacingM`
   (model `chiappetta-plane`), the field table `CHIAPPETTA_FIELD_TABLE` / `chiappettaFieldRow`
   (model `chiappetta-field`) and `chiappettaAirDeckGuide`. His Method I is Sanden's adiabatic form.
+- Berta (1990): `bertaWallPressureMPa` (model `berta`; the explosive's specific pressure Ps·Δc in
+  place of ρD²/8, new design input `specificPressureMPa`) and `bertaSpacingM` with his release
+  coefficient K. The US empirical rules he prints, `presplitTenDiameterSpacingM`,
+  `presplitLoadFromSpacingKgPerM` / `presplitSpacingFromLoadM` (q = 0.815·S², model `us-empirical`),
+  and Du Pont's table `DUPONT_PRESPLIT_TABLE` / `dupontPresplitRow` (model `dupont-table`).
 - `detonationPressureMPa` (C-J, ρD²/4), `acousticImpedance`, `shockTransmission`,
   `decouplingRatio`, and psi / grains-per-foot conversions.
 - Tests against the papers' worked numbers: Konya & Konya (2020), Hustrulid (2007) and CDOT

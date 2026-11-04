@@ -18,27 +18,31 @@
  *   calder-canmet        Pw = N(ρ)·ρD²·(√C·rc/rh)^2.4 (Calder 1977, via Workman & Calder 1991)
  *   chiappetta-plane     0.1 lb/ft² of presplit plane: S = load / 0.488 kg/m² (Chiappetta 1990, II)
  *   chiappetta-field     field-test spacing range for a tabulated hole size (Chiappetta 1990, III)
+ *   berta                Pw = Ps·Δc·(Lc/L)·(Øc/Øf)², the explosive's specific pressure (Berta 1990)
+ *   us-empirical         q = 0.815·S² kg/m and S ≤ 10·Øf (Konya, Britton & Lukovic 1984, via Berta)
+ *   dupont-table         Du Pont's spacing range by hole size (via Berta 1990, Table III.4)
  *
- * The gas-pressure models (ideal gas to Calder) share Sanden's force-balance spacing S = dh·(Pw + T)/T and are
- * checked against the compressive strength (a wall pressure over C crushes the
- * wall). Konya's model has its own spacing law from Young's modulus. The two
- * Chiappetta rules are empirical and give a spacing without a pressure.
- *
- * Berta (1990) is not here yet: its specific pressure needs the primary source.
+ * The gas-pressure models (ideal gas to Calder, and Berta) share Sanden's
+ * force-balance spacing S = dh·(Pw + T)/T and are checked against the
+ * compressive strength (a wall pressure over C crushes the wall). Konya's model
+ * has its own spacing law from Young's modulus. The Chiappetta, US and Du Pont
+ * rules are empirical and give a spacing without a pressure.
  */
 
 import { chiappettaPlaneSpacingM, chiappettaFieldRow, CHIAPPETTA_PLANE_MAX_HOLE_MM } from "./Chiappetta.js";
 import { calderWallPressureMPa } from "./WorkmanCalder.js";
+import { bertaWallPressureMPa, presplitTenDiameterSpacingM, presplitSpacingFromLoadM, dupontPresplitRow } from "./Berta.js";
 import { decouplingRatio, konyaEmpiricalPressureMPa, konyaRequiredPressureMPa, konyaMaxSpacingM } from "./Presplit.js";
 import { explosionPressureMPa, chargeDiameterFromLoadMm, volumeRatio, idealGasWallPressureMPa,
     adiabaticWallPressureMPa, hinoWallPressureMPa, isothermalWallPressureMPa, forceBalanceSpacingM,
     webTensionMPa } from "./WallPressure.js";
 
-// key hustrulid2007presplit (brentbuffham/blasting-knowledge references.bib)
+// keys in brentbuffham/blasting-knowledge references.bib: chiappetta1990presplit,
+// workman1991largehole, berta1990explosives, hustrulid2007presplit
 var C90 = "Chiappetta, R.F. (1990) Presplitting and controlled blasting techniques. 2nd High-Tech Seminar, Orlando, ISEE, Section 14";
-// key workman1991largehole
 var WC91 = "Workman, J.L. & Calder, P.N. (1991) A method for calculating the weight of charge to use in large hole pre-splitting for cast blasting operations. 17th ISEE Conf., Vol 2, 97–105";
-var H07 = "Hustrulid, W.A. (2007) A practical, yet technically sound, design procedure for pre-split blasts. 33rd ISEE Conf., Vol 1, 1–26";
+var B90 = "Berta, G. (1990) Explosives: An Engineering Tool. Italesplosivi, Milano";
+var H07 ="Hustrulid, W.A. (2007) A practical, yet technically sound, design procedure for pre-split blasts. 33rd ISEE Conf., Vol 1, 1–26";
 
 export var PRESPLIT_MODELS = [
     { id: "konya-empirical", label: "Konya empirical (PETN cord)",
@@ -49,7 +53,10 @@ export var PRESPLIT_MODELS = [
     { id: "hustrulid-isothermal", label: "Isothermal co-volume (Utah/NIOSH)", citation: H07 + ", Eqs 55–72" },
     { id: "calder-canmet", label: "Adiabatic, density-dependent N (Calder/CANMET)", citation: "Calder (1977) CANMET Pit Slope Manual Ch 7, via " + WC91 + ", pp99–102 and Fig 1" },
     { id: "chiappetta-plane", label: "Plane charge 0.1 lb/ft² (Chiappetta II)", citation: C90 + ", Method II" },
-    { id: "chiappetta-field", label: "Field-test table (Chiappetta III)", citation: C90 + ", Method III" }
+    { id: "chiappetta-field", label: "Field-test table (Chiappetta III)", citation: C90 + ", Method III" },
+    { id: "berta", label: "Specific pressure (Berta)", citation: B90 + ", formula III.1, pp103–104" },
+    { id: "us-empirical", label: "q = 0.815·S², S ≤ 10·Øf (US empirical)", citation: "Konya, Britton & Lukovic (1984) Removing some of the mystery from presplit blasting, J. Explosives Eng. 1, p20, via " + B90 + ", III.2–III.3, p102" },
+    { id: "dupont-table", label: "Du Pont table", citation: "Du Pont, via " + B90 + ", Table III.4, p102" }
 ];
 
 function median(xs) {
@@ -74,6 +81,7 @@ function median(xs) {
  * @param {number} [d.youngsModulusGPa] - rock E (Konya)
  * @param {number} [d.spacingM] - a spacing to judge
  * @param {number} [d.exponent2Gamma=2.4] - Sanden's 2γ
+ * @param {number} [d.specificPressureMPa] - the explosive's specific pressure Ps (Berta)
  * @returns {{design:Object, models:Array<Object>, summary:Object}}
  *   models[i]: { id, label, citation, wallPressureMPa, maxSpacingM, applicable, notes: string[],
  *   crushes: boolean|null, splits: boolean|null }. summary: { count, minSpacingM, medianSpacingM,
@@ -151,6 +159,34 @@ export function runPresplitModels(d) {
     models.push(Object.assign({}, PRESPLIT_MODELS[7], { wallPressureMPa: null, maxSpacingM: row ? row.spacingM[1] : null,
         minSpacingM: row ? row.spacingM[0] : null, applicable: !!row, notes: fNotes, crushes: null,
         splits: row && d.spacingM > 0 ? d.spacingM <= row.spacingM[1] : null }));
+
+    // Berta: needs the explosive's specific pressure
+    if (d.specificPressureMPa > 0) {
+        models.push(gasModel(PRESPLIT_MODELS[8], bertaWallPressureMPa({ holeDiamMm: d.holeDiamMm, chargeDiamMm: dc,
+            densityGcc: rho, specificPressureMPa: d.specificPressureMPa, chargeFraction: w }),
+            ["Berta's σtr is the tensile resistance with a safety factor: give tensileMPa with one applied"]));
+    } else {
+        models.push(Object.assign({}, PRESPLIT_MODELS[8], { wallPressureMPa: null, maxSpacingM: null, applicable: false,
+            notes: ["needs the explosive's specific pressure (specificPressureMPa)"], crushes: null, splits: null }));
+    }
+
+    // US empirical: the spacing the average charge serves, capped at 10 hole diameters
+    var usLoad = presplitSpacingFromLoadM(avgLoadKgPerM), usCap = presplitTenDiameterSpacingM(d.holeDiamMm);
+    var usS = Math.min(usLoad, usCap);
+    models.push(Object.assign({}, PRESPLIT_MODELS[9], { wallPressureMPa: null, maxSpacingM: usS, applicable: true,
+        notes: ["empirical, no rock properties: the charge serves " + usLoad.toFixed(2) + " m, the 10-diameter limit is " + usCap.toFixed(2) + " m"],
+        crushes: null, splits: d.spacingM > 0 ? d.spacingM <= usS : null }));
+
+    // Du Pont: tabulated hole-size ranges only
+    var dp = dupontPresplitRow(d.holeDiamMm);
+    var dpNotes = ["empirical by hole size; the rock is not in it"];
+    if (dp) {
+        dpNotes.push("row " + dp.holeDiamMm.join("–") + " mm: " + dp.loadKgPerM.join("–") + " kg/m, spacing " + dp.spacingM.join("–") + " m");
+        if (avgLoadKgPerM < dp.loadKgPerM[0] || avgLoadKgPerM > dp.loadKgPerM[1]) dpNotes.push("the charge (" + avgLoadKgPerM.toFixed(2) + " kg/m) is outside the row's loading density");
+    } else dpNotes.push("hole size not in the table (38–44, 51–64, 76–89, 102 mm)");
+    models.push(Object.assign({}, PRESPLIT_MODELS[10], { wallPressureMPa: null, maxSpacingM: dp ? dp.spacingM[1] : null,
+        minSpacingM: dp ? dp.spacingM[0] : null, applicable: !!dp, notes: dpNotes, crushes: null,
+        splits: dp && d.spacingM > 0 ? d.spacingM <= dp.spacingM[1] : null }));
 
     var spacings = [], votes = { yes: 0, no: 0 };
     models.forEach(function (m) {

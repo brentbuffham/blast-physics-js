@@ -82,15 +82,16 @@ describe("models out of range leave the summary", () => {
         var r = runPresplitModels({ holeDiamMm: 76, chargeDiamMm: 32, densityGcc: 1.2, vodMs: 5000, tensileMPa: 5, youngsModulusGPa: 40 });
         expect(byId(r, "konya-empirical").applicable).toBe(false);
         // 4 gas models + Calder + the two Chiappetta rules (76 mm is the 3 in table row)
-        expect(r.summary.count).toBe(7);
+        // + the US rule + Du Pont (76–89 mm row); Berta needs a specific pressure
+        expect(r.summary.count).toBe(9);
     });
     it("without T the gas models give no spacing, and say why", () => {
         var r = runPresplitModels({ holeDiamMm: 76, chargeDiamMm: 32, densityGcc: 1.2, vodMs: 5000 });
         expect(byId(r, "sanden-adiabatic").maxSpacingM).toBeNull();
         expect(byId(r, "sanden-adiabatic").notes.join(" ")).toMatch(/tensile/);
         expect(byId(r, "calder-canmet").maxSpacingM).toBeNull();
-        // only the empirical Chiappetta rules need no rock strength
-        expect(r.summary.count).toBe(2);
+        // only the empirical rules (Chiappetta ×2, US, Du Pont) need no rock strength
+        expect(r.summary.count).toBe(4);
         expect(byId(r, "chiappetta-plane").maxSpacingM).toBeGreaterThan(0);
     });
     it("every model carries a citation", () => {

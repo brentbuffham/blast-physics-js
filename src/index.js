@@ -76,6 +76,8 @@ export { chiappettaPlaneLoadKgPerM, chiappettaPlaneSpacingM, chiappettaFieldRow,
         CHIAPPETTA_FIELD_TABLE, CHIAPPETTA_PLANE_CHARGE_KG_M2, CHIAPPETTA_PLANE_MAX_HOLE_MM } from "./presplit/Chiappetta.js";
 export { calderNFactor, calderCoupledPressureMPa, calderWallPressureMPa, calderChargeDiameterMm,
         calderBottomChargeKg, CALDER_N_POINTS } from "./presplit/WorkmanCalder.js";
+export { bertaWallPressureMPa, bertaSpacingM, presplitTenDiameterSpacingM, presplitLoadFromSpacingKgPerM,
+        presplitSpacingFromLoadM, DUPONT_PRESPLIT_TABLE, dupontPresplitRow } from "./presplit/Berta.js";
 
 // Detonation
 export { simulateDetonation, computeEmValues, processHoleDetonation } from "./detonation/DetonationSimulator.js";
